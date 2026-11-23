@@ -30,7 +30,7 @@ export function ExportDialog({ project, onClose }: Props) {
     if (!ctx) return;
     let f = 0;
     const id = window.setInterval(() => {
-      composeFrame(ctx, project, f, { paper, includeHidden });
+      composeFrame(ctx, project, f, { paper, includeHidden, camera: true });
       f = (f + 1) % frames;
     }, 1000 / project.fps);
     return () => window.clearInterval(id);

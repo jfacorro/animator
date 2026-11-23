@@ -3,11 +3,12 @@ import { scaleAbout, strokeBounds, strokesInLasso, translate, unionBoxes, apply,
 import { addStroke, drawingAt, transformStrokes, type Point, type Project, type Stroke } from '../model/project';
 import { floodFillSpans } from '../render/fill';
 import { catchUp, stabilize } from '../model/brushes';
+import { cameraAt, cameraCorners, hasCamera, setCameraKey, type CameraView } from '../model/camera';
 import { composeFrame, paintStroke, type OnionOptions } from '../render/render';
 import { FIT_VIEW, flipAt, pinch, rotateAt, screenToLocal, snapRotation, viewTransform, zoomAt, type View } from '../model/view';
 import * as I from './Icons';
 
-export type Tool = 'brush' | 'eraser' | 'line' | 'rect' | 'ellipse' | 'fill' | 'eyedropper' | 'select';
+export type Tool = 'brush' | 'eraser' | 'line' | 'rect' | 'ellipse' | 'fill' | 'eyedropper' | 'select' | 'camera';
 
 export interface BrushSettings {
   color: string;
@@ -44,6 +45,8 @@ interface Props {
   panKey: boolean;
   /** Called when a Space-drag pans, so letting go of Space doesn't toggle playback. */
   onPanned: () => void;
+  /** During playback the scene is framed through the camera. */
+  playing: boolean;
 }
 
 /** Navigation gestures: pan with one pointer, or pinch (zoom/rotate/pan) with two fingers. */
@@ -56,12 +59,13 @@ type Gesture =
   | { type: 'shape'; pointerId: number; stroke: Stroke; start: Vec }
   | { type: 'lasso'; pointerId: number; points: Vec[] }
   | { type: 'move'; pointerId: number; start: Vec; matrix: Matrix }
-  | { type: 'scale'; pointerId: number; origin: Vec; corner: Vec; matrix: Matrix };
+  | { type: 'scale'; pointerId: number; origin: Vec; corner: Vec; matrix: Matrix }
+  | { type: 'camera'; pointerId: number; mode: 'move' | 'zoom'; start: Vec; base: CameraView; view: CameraView };
 
 const SHAPES: Tool[] = ['line', 'rect', 'ellipse'];
 const EDITS: Tool[] = ['brush', 'eraser', 'line', 'rect', 'ellipse', 'fill', 'select'];
 
-export function Stage({ project, frame, activeLayerId, tool, brush, onion, selection, onSelectionChange, onCommit, onPickColor, panKey, onPanned }: Props) {
+export function Stage({ project, frame, activeLayerId, tool, brush, onion, selection, onSelectionChange, onCommit, onPickColor, panKey, onPanned, playing }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gestureRef = useRef<Gesture | null>(null);
@@ -112,8 +116,8 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     let shown = project;
     if (g && (g.type === 'move' || g.type === 'scale') && selection) shown = transformStrokes(project, activeLayerId, frame, selection, g.matrix);
     const live = g && (g.type === 'stroke' || g.type === 'shape') ? { layerId: activeLayerId, stroke: g.stroke } : null;
-    composeFrame(ctx, shown, frame, { paper: true, onion, live });
-  }, [project, frame, onion, activeLayerId, selection]);
+    composeFrame(ctx, shown, frame, { paper: true, onion, live, camera: playing });
+  }, [project, frame, onion, activeLayerId, selection, playing]);
 
   useEffect(() => {
     paint();
@@ -309,6 +313,17 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     const pt = toPoint(e, false);
     const [x, y] = pt;
 
+    if (tool === 'camera') {
+      e.currentTarget.setPointerCapture(e.pointerId);
+      const base = cameraAt(project, frame);
+      const corners = cameraCorners(base, project.width, project.height);
+      const r = 14 / vs;
+      const onCorner = corners.some(([cx, cy]) => Math.abs(cx - x) <= r && Math.abs(cy - y) <= r);
+      gestureRef.current = { type: 'camera', pointerId: e.pointerId, mode: onCorner ? 'zoom' : 'move', start: [x, y], base, view: base };
+      schedulePaint();
+      return;
+    }
+
     // Eyedropper, or Alt+click with any drawing tool.
     if (tool === 'eyedropper' || (e.altKey && tool !== 'select' && tool !== 'eraser')) {
       pickColor(x, y);
@@ -416,6 +431,16 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
         }
       }
       g.stroke = { ...g.stroke, points: [g.stroke.points[0], [ex, ey, 0.5]] };
+    } else if (g.type === 'camera') {
+      const b = g.base;
+      if (g.mode === 'move') {
+        g.view = { ...b, x: b.x + (x - g.start[0]), y: b.y + (y - g.start[1]) };
+      } else {
+        // Dragging a corner out shows more of the scene (zooms out).
+        const d0 = Math.hypot(g.start[0] - b.x, g.start[1] - b.y) || 1;
+        const d1 = Math.hypot(x - b.x, y - b.y) || 1;
+        g.view = { ...b, zoom: Math.min(20, Math.max(0.1, (b.zoom * d0) / d1)) };
+      }
     } else if (g.type === 'lasso') {
       g.points.push([x, y]);
     } else if (g.type === 'move') {
@@ -447,6 +472,11 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       const [a, b] = g.stroke.points;
       if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 1) onCommit((p) => addStroke(p, activeLayerId, frame, g.stroke));
       else paint();
+    } else if (g.type === 'camera') {
+      const v = g.view;
+      if (v !== g.base) onCommit((p) => setCameraKey(p, frame, v));
+      else paint();
+      setOverlayTick((t) => t + 1);
     } else if (g.type === 'lasso') {
       const strokes = drawing?.strokes ?? [];
       let hits = strokesInLasso(strokes, g.points);
@@ -472,9 +502,13 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
 
   const g = gestureRef.current;
   const box = tool === 'select' ? selectionBox() : null;
+  // The camera's frame: shown while the camera tool is on, or faintly whenever the camera moves.
+  const camView = g?.type === 'camera' ? g.view : !playing && (tool === 'camera' || hasCamera(project)) ? cameraAt(project, frame) : null;
+  const camCorners = camView ? cameraCorners(camView, project.width, project.height) : null;
+  const camActive = tool === 'camera';
   const showBrushCursor = (tool === 'brush' || tool === 'eraser') && cursor && !blocked && !panKey && !navigating;
   const cursorSize = (tool === 'eraser' ? brush.eraserSize : brush.size) * scale;
-  const canvasClass = tool === 'eyedropper' ? 'pick' : blocked && EDITS.includes(tool) ? 'blocked' : tool === 'fill' ? 'fill' : tool === 'select' ? 'select' : 'draw';
+  const canvasClass = tool === 'camera' ? 'camera' : tool === 'eyedropper' ? 'pick' : blocked && EDITS.includes(tool) ? 'blocked' : tool === 'fill' ? 'fill' : tool === 'select' ? 'select' : 'draw';
   const hs = 10 / vs; // handle size in project px
 
   return (
@@ -500,8 +534,22 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
           onPointerCancel={finish}
           onPointerLeave={() => setCursor(null)}
         />
-        {(box || g?.type === 'lasso' || (g?.type === 'stroke' && brush.stabilizer > 0 && !g.stroke.erase)) && (
+        {(box || camCorners || g?.type === 'lasso' || (g?.type === 'stroke' && brush.stabilizer > 0 && !g.stroke.erase)) && (
           <svg className="overlay" viewBox={`0 0 ${project.width} ${project.height}`} aria-hidden="true">
+            {camCorners && (
+              <g className={`camera-frame${camActive ? ' active' : ''}`}>
+                <polygon
+                  points={camCorners.map((p) => p.join(',')).join(' ')} fill={camActive ? 'rgba(76,141,240,0.06)' : 'none'}
+                  stroke="#4c8df0" strokeWidth={(camActive ? 2 : 1.2) / vs} strokeDasharray={camActive ? undefined : `${8 / vs} ${5 / vs}`}
+                />
+                {camActive && camCorners.map(([cx, cy], i) => (
+                  <rect key={i} x={cx - hs / 2} y={cy - hs / 2} width={hs} height={hs} fill="#fff" stroke="#4c8df0" strokeWidth={1.5 / vs} />
+                ))}
+                {camActive && (
+                  <line x1={camCorners[0][0]} y1={camCorners[0][1]} x2={camCorners[1][0]} y2={camCorners[1][1]} stroke="#4c8df0" strokeWidth={5 / vs} />
+                )}
+              </g>
+            )}
             {g?.type === 'stroke' && (
               // Stabilizer: a string from the pointer to the trailing pen tip.
               <g>

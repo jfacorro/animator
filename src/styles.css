@@ -277,3 +277,31 @@ button.file-status.paused {
 .link-btn { border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline; padding: 0; }
 .link-btn:hover { color: var(--text); }
 .swatches .icon-btn.sm:disabled { opacity: 0.35; }
+
+/* Onion skin settings */
+.onion-label { display: flex; align-items: center; gap: 8px; }
+.dot-input { width: 14px; height: 14px; padding: 0; border: 0; border-radius: 50%; overflow: hidden; cursor: pointer; background: none; }
+.dot-input::-webkit-color-swatch-wrapper { padding: 0; }
+.dot-input::-webkit-color-swatch { border: 0; border-radius: 50%; }
+.dot-input::-moz-color-swatch { border: 0; border-radius: 50%; }
+.layers .row input[type=range] { width: 100px; }
+
+/* Camera */
+.stage canvas.camera { cursor: move; }
+
+/* Camera and sound rows in the timeline */
+.track-name.special { color: var(--muted); cursor: default; }
+.track-name.special .track-label { display: flex; align-items: center; gap: 6px; }
+.track-name.special .track-label svg { flex-shrink: 0; }
+.special-track { background: #ffffff05; }
+.camera-key {
+  position: absolute; top: 11px; width: 14px; height: 14px; padding: 0; border: 0; background: none; color: #4c8df0; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; z-index: 1;
+}
+.camera-key.current { color: var(--accent); }
+.waveform {
+  position: absolute; top: 5px; height: 26px; border-radius: 5px; background: #1f2a20; border: 1px solid #2f4231;
+  overflow: hidden; cursor: grab; touch-action: none; z-index: 1;
+}
+.waveform canvas { display: block; }
+.waveform-loading { font-size: 11px; color: var(--muted); padding: 0 6px; line-height: 26px; }

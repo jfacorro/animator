@@ -1,4 +1,5 @@
 import { getStroke } from 'perfect-freehand';
+import { cameraAt, cameraMatrix, hasCamera } from '../model/camera';
 import { celIndexAt, type Drawing, type Project, type Stroke } from '../model/project';
 
 export const PAPER = '#fbfaf7';
@@ -160,9 +161,14 @@ export function tintedBitmap(d: Drawing, color: string, w: number, h: number): H
 }
 
 export interface OnionOptions {
-  layerId: string;
+  /** The layer to show onion skins for, or null for every visible layer. */
+  layerId: string | null;
   before: number;
   after: number;
+  /** Strength of the nearest onion skin, 0–1. Further ones fade. */
+  opacity?: number;
+  beforeColor?: string;
+  afterColor?: string;
 }
 
 export interface ComposeOptions {
@@ -171,6 +177,8 @@ export interface ComposeOptions {
   includeHidden?: boolean;
   /** A stroke in progress, drawn into this layer's current drawing. */
   live?: { layerId: string; stroke: Stroke } | null;
+  /** Frame the scene through the camera (playback and export). */
+  camera?: boolean;
 }
 
 let scratch: HTMLCanvasElement | null = null;
@@ -188,11 +196,13 @@ export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, fr
   } else {
     ctx.clearRect(0, 0, w, h);
   }
+  if (opts.camera && hasCamera(project)) ctx.setTransform(...cameraMatrix(cameraAt(project, frame), w, h));
 
   for (const layer of project.layers) {
     if (!layer.visible && !opts.includeHidden) continue;
 
-    if (opts.onion && opts.onion.layerId === layer.id) {
+    const onion = opts.onion;
+    if (onion && (onion.layerId === layer.id || (onion.layerId === null && !layer.locked))) {
       const i = celIndexAt(layer, frame);
       // Past the end of the layer, the previous drawings are the last ones.
       const anchor = i >= 0 ? i : layer.cels.length;
@@ -200,11 +210,11 @@ export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, fr
         const cel = layer.cels[index];
         const d = cel?.drawingId ? project.drawings[cel.drawingId] : null;
         if (!d || !d.strokes.length) return;
-        ctx.globalAlpha = 0.45 * (1 - (step - 1) / (count + 0.5));
+        ctx.globalAlpha = (onion.opacity ?? 0.45) * (1 - (step - 1) / (count + 0.5));
         ctx.drawImage(tintedBitmap(d, color, w, h), 0, 0);
       };
-      for (let k = opts.onion.before; k >= 1; k--) draw(anchor - k, ONION_BEFORE, k, opts.onion.before);
-      if (i >= 0) for (let k = opts.onion.after; k >= 1; k--) draw(anchor + k, ONION_AFTER, k, opts.onion.after);
+      for (let k = onion.before; k >= 1; k--) draw(anchor - k, onion.beforeColor ?? ONION_BEFORE, k, onion.before);
+      if (i >= 0) for (let k = onion.after; k >= 1; k--) draw(anchor + k, onion.afterColor ?? ONION_AFTER, k, onion.after);
       ctx.globalAlpha = 1;
     }
 

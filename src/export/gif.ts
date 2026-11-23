@@ -28,7 +28,7 @@ export async function exportGif(project: Project, opts: GifOptions): Promise<Blo
   const total = sceneLength(project);
   const frames: { data: Uint8ClampedArray; frames: number }[] = [];
   for (let f = 0; f < total; f++) {
-    composeFrame(fctx, project, f, { paper: opts.paper, includeHidden: opts.includeHidden });
+    composeFrame(fctx, project, f, { paper: opts.paper, includeHidden: opts.includeHidden, camera: true });
     octx.clearRect(0, 0, w, h);
     octx.drawImage(full, 0, 0, w, h);
     const data = octx.getImageData(0, 0, w, h).data;

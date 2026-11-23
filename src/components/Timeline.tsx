@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import * as I from './Icons';
 import { useLayerDrag } from './useLayerDrag';
+import { peaks, useAudioBuffer } from '../audio';
+import type { AudioTrack } from '../model/project';
 import { celIndexAt, celStart, dropIndex, dropSlot, layerLength, sceneLength, type Layer, type Project } from '../model/project';
 
 const FW = 26; // frame width in px
@@ -23,6 +25,14 @@ interface Props {
   onFrameAction: (action: FrameAction, layerId: string, frame: number) => void;
   /** Something has been copied and can be pasted. */
   canPaste: boolean;
+  /** Show the camera row (camera tool on, or the camera has keys). */
+  showCamera: boolean;
+  /** Hear a frame of sound when stepping through frames. */
+  scrub: boolean;
+  onScrubChange: (scrub: boolean) => void;
+  onAudioChange: (patch: Partial<AudioTrack>, record?: boolean) => void;
+  onRemoveAudio: () => void;
+  onAddAudio: () => void;
   onMoveCel: (layerId: string, from: number, to: number) => void;
   onUpdateLayer: (layerId: string, patch: Partial<Pick<Layer, 'name' | 'visible' | 'locked'>>) => void;
   /** Drag a layer into a gap in the stack, counted bottom to top. */
@@ -65,7 +75,10 @@ export function Timeline(props: Props) {
   const [renaming, setRenaming] = useState<string | null>(null);
   const layerDrag = useLayerDrag(project.layers.length, props.onMoveLayerTo);
   const length = sceneLength(project);
-  const columns = Math.max(length + 12, 48);
+  const audio = project.audio ?? null;
+  const audioBuffer = useAudioBuffer(audio);
+  const audioFrames = audioBuffer ? Math.ceil(audioBuffer.duration * project.fps) : 0;
+  const columns = Math.max(length + 12, 48, audio ? audio.start + audioFrames + 4 : 0);
   const topFirst = [...project.layers].reverse();
   const active = project.layers.find((l) => l.id === activeLayerId);
   const celIndex = active ? celIndexAt(active, frame) : -1;
@@ -189,13 +202,34 @@ export function Timeline(props: Props) {
           <button className="btn small" disabled={!active?.cels.length || playing} onClick={props.onHoldToEnd} title="Hold this drawing until the end of the scene">To end</button>
         </div>
         <div className="spacer" />
-        <span className="hint">Click the selected drawing or right-click for options · drag to move</span>
+        {audio && (
+          <label className="hint" title="Play a frame's worth of the sound each time you step to a frame, to find where words and beats fall">
+            <input type="checkbox" checked={props.scrub} onChange={(e) => props.onScrubChange(e.target.checked)} /> Scrub sound
+          </label>
+        )}
+        {!audio && !props.showCamera && <span className="hint">Click the selected drawing or right-click for options · drag to move</span>}
         <button className="btn small" disabled={playing} onClick={props.onNewDrawing} title="New drawing (N)">+ New drawing</button>
         <button className="btn small" disabled={!cel || playing} onClick={props.onDuplicate} title="Duplicate drawing (D)">Duplicate</button>
         <button className="btn small" disabled={!cel || playing} onClick={props.onDelete} title="Delete drawing">Delete</button>
       </div>
       <div className="timeline-body">
         <div className="track-names" ref={namesRef}>
+          {props.showCamera && (
+            <div className="track-name special" title="Camera keys: the camera glides from one key to the next when you play. Use the camera tool (K) to set them.">
+              <span className="track-label"><I.Camera /> Camera</span>
+            </div>
+          )}
+          {audio && (
+            <div className="track-name special" title={`Sound: ${audio.name}. Drag the waveform sideways to change where it starts.`}>
+              <span className="track-label"><I.Sound /> {audio.name}</span>
+              <button
+                className={`icon-btn xs${audio.volume === 0 ? ' locked' : ''}`} aria-label={audio.volume === 0 ? 'Unmute sound' : 'Mute sound'}
+                title={audio.volume === 0 ? 'Turn the sound back on' : 'Mute the sound'}
+                onClick={() => props.onAudioChange({ volume: audio.volume === 0 ? 1 : 0 })}
+              >{audio.volume === 0 ? <I.Mute /> : <I.Sound />}</button>
+              <button className="icon-btn xs" aria-label="Remove sound" title="Remove the sound from this animation" onClick={props.onRemoveAudio}><I.Trash /></button>
+            </div>
+          )}
           {topFirst.map((l, i) => (
             <div
               key={l.id}
@@ -257,6 +291,22 @@ export function Timeline(props: Props) {
                 </div>
               ))}
             </div>
+            {props.showCamera && (
+              <div className="track special-track" title="Camera keys. Click a frame to go to it.">
+                <div className="track-grid" aria-hidden="true">
+                  {Array.from({ length: columns }, (_, f) => <div key={f} style={{ width: FW }} onClick={() => props.onSelectFrame(f)} />)}
+                </div>
+                {(project.camera ?? []).map((k) => (
+                  <button
+                    key={k.frame} className={`camera-key${k.frame === frame ? ' current' : ''}`} style={{ left: k.frame * FW + FW / 2 - 7 }}
+                    aria-label={`Camera key at frame ${k.frame + 1}`} title={`Camera key at frame ${k.frame + 1}`} onClick={() => props.onSelectFrame(k.frame)}
+                  ><I.Diamond /></button>
+                ))}
+              </div>
+            )}
+            {audio && (
+              <AudioTrackRow audio={audio} buffer={audioBuffer} frames={audioFrames} columns={columns} onSelectFrame={props.onSelectFrame} onChange={props.onAudioChange} />
+            )}
             {topFirst.map((l) => {
               const dragging = drag?.layerId === l.id ? drag : null;
               return (
@@ -333,5 +383,78 @@ export function Timeline(props: Props) {
         </div>
       )}
     </section>
+  );
+}
+
+function AudioTrackRow({ audio, buffer, frames, columns, onSelectFrame, onChange }: {
+  audio: AudioTrack;
+  buffer: AudioBuffer | null;
+  frames: number;
+  columns: number;
+  onSelectFrame: (frame: number) => void;
+  onChange: (patch: Partial<AudioTrack>, record?: boolean) => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const press = useRef<{ pointerId: number; x: number; start: number; moved: boolean } | null>(null);
+  const width = Math.max(1, frames * FW);
+
+  useEffect(() => {
+    const c = canvasRef.current;
+    if (!c || !buffer) return;
+    const dpr = window.devicePixelRatio || 1;
+    c.width = Math.min(32000, Math.round(width * dpr));
+    c.height = Math.round(26 * dpr);
+    const ctx = c.getContext('2d')!;
+    const bars = Math.max(1, Math.floor(width / 2));
+    const p = peaks(buffer, bars);
+    const mid = c.height / 2;
+    ctx.clearRect(0, 0, c.width, c.height);
+    ctx.fillStyle = audio.volume === 0 ? '#6b6f78' : '#6faf6a';
+    const bw = c.width / bars;
+    for (let i = 0; i < bars; i++) {
+      const hgt = Math.max(1, p[i] * (c.height - 2));
+      ctx.fillRect(i * bw, mid - hgt / 2, Math.max(1, bw - dpr * 0.5), hgt);
+    }
+  }, [buffer, width, audio.volume]);
+
+  const frameAt = (e: React.PointerEvent<HTMLElement>, el: HTMLElement) => {
+    const r = el.getBoundingClientRect();
+    return Math.max(0, Math.floor((e.clientX - r.left) / FW));
+  };
+
+  return (
+    <div className="track special-track audio-track">
+      <div className="track-grid" aria-hidden="true">
+        {Array.from({ length: columns }, (_, f) => <div key={f} style={{ width: FW }} onClick={() => onSelectFrame(f)} />)}
+      </div>
+      <div
+        className="waveform"
+        style={{ left: audio.start * FW, width }}
+        title="Drag sideways to change where the sound starts. Click to go to that frame."
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          press.current = { pointerId: e.pointerId, x: e.clientX, start: audio.start, moved: false };
+        }}
+        onPointerMove={(e) => {
+          const p = press.current;
+          if (!p || p.pointerId !== e.pointerId) return;
+          const shift = Math.round((e.clientX - p.x) / FW);
+          if (!p.moved && Math.abs(e.clientX - p.x) < 4) return;
+          p.moved = true;
+          const start = Math.max(0, p.start + shift);
+          if (start !== audio.start) onChange({ start }, false);
+        }}
+        onPointerUp={(e) => {
+          const p = press.current;
+          press.current = null;
+          if (!p) return;
+          if (p.moved) onChange({ start: audio.start }, true);
+          else onSelectFrame(audio.start + frameAt(e, e.currentTarget));
+        }}
+        onPointerCancel={() => { press.current = null; }}
+      >
+        {buffer ? <canvas ref={canvasRef} style={{ width, height: 26 }} /> : <span className="waveform-loading">Loading sound…</span>}
+      </div>
+    </div>
   );
 }
