@@ -7,6 +7,7 @@ import { Timeline, type FrameAction } from './components/Timeline';
 import { commit, initHistory, redo, undo, type History } from './model/history';
 import { scaleAbout, strokeBounds, translate, unionBoxes } from './model/geometry';
 import * as P from './model/project';
+import { matchingPreset, PRESETS, type BrushPreset } from './model/brushes';
 import {
   canSaveToFile, filePermission, loadCurrentProject, loadLinkedFile, pickOpenFile, pickSaveFile, readProjectFile, rememberLinkedFile,
   saveCurrentProject, saveProjectFile, writeProjectFile, type LinkedFile,
@@ -27,7 +28,32 @@ const TOOLS: { id: Tool; name: string; key: string; help: string; Icon: () => Re
 const TOOL_KEYS: Record<string, Tool> = Object.fromEntries(TOOLS.map((t) => [t.key, t.id]));
 const COLOUR_TOOLS: Tool[] = ['brush', 'line', 'rect', 'ellipse', 'fill', 'eyedropper'];
 
-const SWATCHES = ['#1a1a1a', '#6b6f78', '#e5534b', '#f08a3a', '#f2c94c', '#6faf6a', '#5b8fd9', '#9b6fd6', '#ffffff'];
+const DEFAULT_PALETTE = ['#1a1a1a', '#6b6f78', '#e5534b', '#f08a3a', '#f2c94c', '#6faf6a', '#5b8fd9', '#9b6fd6', '#ffffff'];
+const PALETTE_KEY = 'animator:palette';
+const BRUSH_KEY = 'animator:brush';
+const MAX_PALETTE = 24;
+
+const INK = PRESETS.find((p) => p.id === 'ink')!;
+const DEFAULT_BRUSH: BrushSettings = {
+  color: '#1a1a1a', eraserSize: 24, pressure: true, fillShapes: false,
+  size: INK.size, opacity: INK.opacity, smoothing: INK.smoothing, stabilizer: INK.stabilizer, thinning: INK.thinning, softness: INK.softness,
+};
+
+/** Per-browser preferences: the palette and the last brush. Storage can be blocked, so every access is guarded. */
+function loadPref<T>(key: string, fallback: T, valid: (v: unknown) => boolean): T {
+  try {
+    const raw = localStorage.getItem(key);
+    const v: unknown = raw ? JSON.parse(raw) : null;
+    return v !== null && valid(v) ? (v as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function savePref(key: string, value: unknown) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* not saved; fine */ }
+}
+const isHex = (c: unknown) => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c);
+const pct = (v: number) => `${Math.round(v * 100)}%`;
 
 export default function App() {
   const [history, setHistory] = useState<History<P.Project>>(() => initHistory(P.createProject()));
@@ -36,7 +62,18 @@ export default function App() {
   const [activeLayerId, setActiveLayerId] = useState(() => history.present.layers.at(-1)!.id);
   const [frame, setFrame] = useState(0);
   const [tool, setTool] = useState<Tool>('brush');
-  const [brush, setBrush] = useState<BrushSettings>({ color: '#1a1a1a', size: 6, eraserSize: 24, smoothing: 0.5, pressure: true, fillShapes: false });
+  const [brush, setBrush] = useState<BrushSettings>(() => {
+    const saved = loadPref<Partial<BrushSettings>>(BRUSH_KEY, {}, (v) => typeof v === 'object');
+    const merged = { ...DEFAULT_BRUSH, ...saved };
+    return Object.keys(DEFAULT_BRUSH).every((k) => typeof merged[k as keyof BrushSettings] === typeof DEFAULT_BRUSH[k as keyof BrushSettings]) ? merged : DEFAULT_BRUSH;
+  });
+  const [palette, setPalette] = useState<string[]>(() => loadPref(PALETTE_KEY, DEFAULT_PALETTE, (v) => Array.isArray(v) && v.length > 0 && v.every(isHex)));
+  useEffect(() => { savePref(BRUSH_KEY, brush); }, [brush]);
+  useEffect(() => { savePref(PALETTE_KEY, palette); }, [palette]);
+  const preset = matchingPreset(brush);
+  const usePreset = (p: BrushPreset) => setBrush((b) => ({
+    ...b, size: p.size, opacity: p.opacity, smoothing: p.smoothing, stabilizer: p.stabilizer, thinning: p.thinning, softness: p.softness, pressure: p.thinning > 0,
+  }));
   const [selection, setSelection] = useState<number[] | null>(null);
   const [onion, setOnion] = useState<OnionState>({ enabled: true, before: 1, after: 1 });
   const [playing, setPlaying] = useState(false);
@@ -115,11 +152,30 @@ export default function App() {
     setFileStatus('saved');
     rememberLinkedFile(file);
   }, []);
+  // Save at once after a quiet spell, then at most every 400 ms while changes keep coming (slider drags).
+  const lastSave = useRef(0);
   useEffect(() => {
     if (!loaded) return;
-    const id = window.setTimeout(() => saveCurrentProject(project).catch(() => {}), 400);
+    const save = () => { lastSave.current = performance.now(); saveCurrentProject(project).catch(() => {}); };
+    const wait = 400 - (performance.now() - lastSave.current);
+    if (wait <= 0) { save(); return; }
+    const id = window.setTimeout(save, wait);
     return () => window.clearTimeout(id);
   }, [project, loaded]);
+  // Save straight away when the tab is hidden or closed, so the last stroke isn't lost.
+  const latest = useRef(project);
+  latest.current = project;
+  useEffect(() => {
+    if (!loaded) return;
+    const flush = () => { saveCurrentProject(latest.current).catch(() => {}); };
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flush(); };
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [loaded]);
 
   // Keep the selected layer valid after undo or layer deletion.
   useEffect(() => {
@@ -470,6 +526,14 @@ export default function App() {
 
       <div className="tool-options">
         <span className="tool-name">{TOOLS.find((t) => t.id === tool)?.name}</span>
+        {tool === 'brush' && (
+          <div className="presets" role="group" aria-label="Brush presets">
+            {PRESETS.map((p) => (
+              <button key={p.id} className={`btn small${preset?.id === p.id ? ' on' : ''}`} aria-pressed={preset?.id === p.id} title={`${p.name}: ${p.help}`} onClick={() => usePreset(p)}>{p.name}</button>
+            ))}
+            {!preset && <span className="hint" title="You've changed the settings of a preset">Custom</span>}
+          </div>
+        )}
         {(tool === 'brush' || tool === 'eraser' || tool === 'line' || tool === 'rect' || tool === 'ellipse') && !(brush.fillShapes && (tool === 'rect' || tool === 'ellipse')) && (
           <label title={isEraser ? 'Width of the eraser in pixels ([ and ] to change)' : 'Width of the line in pixels ([ and ] to change)'}>Size
             <input
@@ -485,8 +549,22 @@ export default function App() {
               <input type="range" min={0} max={100} value={Math.round(brush.smoothing * 100)} onChange={(e) => setBrush((b) => ({ ...b, smoothing: Number(e.target.value) / 100 }))} />
               <span className="value">{Math.round(brush.smoothing * 100)}%</span>
             </label>
-            <label title="Lines get thicker when you press harder with a pen or tablet. With a mouse it imitates pressure from drawing speed. Untick for an even line width."><input type="checkbox" checked={brush.pressure} onChange={(e) => setBrush((b) => ({ ...b, pressure: e.target.checked }))} /> Pressure</label>
+            <label title="Steadies the line: it trails behind the pointer and ignores small wobbles. Higher values are steadier but lag more.">Stabilizer
+              <input type="range" min={0} max={100} value={Math.round(brush.stabilizer * 100)} onChange={(e) => setBrush((b) => ({ ...b, stabilizer: Number(e.target.value) / 100 }))} />
+              <span className="value">{pct(brush.stabilizer)}</span>
+            </label>
+            <label title="Blurs the edge of the line. 0% is crisp.">Soft edge
+              <input type="range" min={0} max={100} value={Math.round(brush.softness * 100)} onChange={(e) => setBrush((b) => ({ ...b, softness: Number(e.target.value) / 100 }))} />
+              <span className="value">{pct(brush.softness)}</span>
+            </label>
+            <label title="Lines get thicker when you press harder with a pen or tablet. With a mouse it imitates pressure from drawing speed. Untick for an even line width."><input type="checkbox" checked={brush.pressure} onChange={(e) => setBrush((b) => ({ ...b, pressure: e.target.checked, thinning: e.target.checked && !b.thinning ? 0.6 : b.thinning }))} /> Pressure</label>
           </>
+        )}
+        {(tool === 'brush' || tool === 'line' || tool === 'rect' || tool === 'ellipse' || tool === 'fill') && (
+          <label title="How solid the colour is. Lower values let lines and colours underneath show through.">Opacity
+            <input type="range" min={5} max={100} value={Math.round(brush.opacity * 100)} onChange={(e) => setBrush((b) => ({ ...b, opacity: Number(e.target.value) / 100 }))} />
+            <span className="value">{pct(brush.opacity)}</span>
+          </label>
         )}
         {(tool === 'rect' || tool === 'ellipse') && (
           <label title="Fill the shape with colour instead of drawing its outline"><input type="checkbox" checked={brush.fillShapes} onChange={(e) => setBrush((b) => ({ ...b, fillShapes: e.target.checked }))} /> Filled</label>
@@ -508,10 +586,23 @@ export default function App() {
         {COLOUR_TOOLS.includes(tool) && (
           <div className="swatches" role="group" aria-label="Colour">
             Colour
-            {SWATCHES.map((c) => (
-              <button key={c} className={`swatch${brush.color === c ? ' on' : ''}`} style={{ background: c }} aria-label={`Colour ${c}`} title="Drawing colour" onClick={() => setBrush((b) => ({ ...b, color: c }))} />
+            {palette.map((c) => (
+              <button
+                key={c} className={`swatch${brush.color === c ? ' on' : ''}`} style={{ background: c }} aria-label={`Colour ${c}`}
+                title={`${c}. Right-click to remove it from the palette.`}
+                onClick={() => setBrush((b) => ({ ...b, color: c }))}
+                onContextMenu={(e) => { e.preventDefault(); setPalette((p) => (p.length > 1 ? p.filter((x) => x !== c) : p)); }}
+              />
             ))}
             <input className="color-input" type="color" aria-label="Custom colour" title="Pick any colour" value={brush.color} onChange={(e) => setBrush((b) => ({ ...b, color: e.target.value }))} />
+            <button
+              className="icon-btn sm" aria-label="Add colour to palette" disabled={palette.includes(brush.color.toLowerCase()) || palette.length >= MAX_PALETTE}
+              title={palette.includes(brush.color.toLowerCase()) ? 'This colour is already in the palette' : 'Save the current colour in the palette. The palette is kept in this browser for all your animations.'}
+              onClick={() => setPalette((p) => [...p, brush.color.toLowerCase()])}
+            ><I.Plus /></button>
+            {palette.join() !== DEFAULT_PALETTE.join() && (
+              <button className="link-btn" title="Go back to the starting colours" onClick={() => { if (window.confirm('Reset the palette to the starting colours?')) setPalette(DEFAULT_PALETTE); }}>Reset</button>
+            )}
           </div>
         )}
       </div>
