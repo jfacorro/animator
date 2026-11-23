@@ -395,6 +395,7 @@ export default function App() {
         onDelete={() => apply((p) => P.deleteCelAt(p, activeLayerId, frame))}
         onFrameAction={onFrameAction}
         onMoveCel={onMoveCel}
+        onUpdateLayer={(id, patch) => apply((p) => P.updateLayer(p, id, patch))}
       />
 
       {exporting && <ExportDialog project={project} onClose={() => setExporting(false)} />}
