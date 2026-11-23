@@ -49,6 +49,18 @@ npm run build    # static site in dist/
   group has a blend mode (Multiply for shadows, Screen/Add for light, …), and
   *Clip to layer below* shows a layer only where the layer under it has paint
   (colour and shading inside the lines).
+- **Drawing aids.** *Symmetry* (in the brush, eraser and shape options, or Y)
+  mirrors what you draw left–right, top–bottom or both across the middle of
+  the canvas; the purple dashed lines show the axes. The ruler button in the
+  view controls (Shift+R) shows rulers: drag down from the top ruler or right
+  from the left one to add a guide, drag its marker to move it, and drag it
+  back onto its ruler (or double-click the marker) to remove it. Lines and
+  shapes snap to guides. Guides are saved with the animation.
+- **Reference image.** *Add reference image…* (the picture button in the
+  Layers panel, or the ⋯ menu) adds a picture to trace over as a see-through
+  layer at the bottom. It shows on every frame but never in exports or
+  playback, and can't be drawn on. Select its layer and use the Lasso tool to
+  move it, or drag a corner to resize it.
 - **Camera.** The camera tool (K) frames the shot: drag the blue frame to pan,
   a corner to zoom, and use the rotation slider to tilt. Each change sets a key
   on the current frame, and the camera eases between keys. Remove a key with
@@ -85,6 +97,8 @@ Drag the thin line on the edge of the tools, layers panel or timeline to resize 
 | S | Lasso select: drag to move, corners to resize, Delete to remove, Esc to deselect |
 | K | Camera (Delete removes the key on this frame) |
 | [ / ] | Smaller / bigger brush |
+| Y | Symmetry: off → left–right → top–bottom → both |
+| Shift+R | Rulers and guides on / off |
 | N | New drawing after the current one |
 | D | Duplicate the current drawing |
 | O | Onion skin on / off |
@@ -120,7 +134,7 @@ Computer first: the standard tools of a digital 2D animation app.
 1. ~~Canvas navigation and copy/paste: zoom, pan, rotate, mirror, fit~~ (done)
 2. ~~Brushes: opacity, stabilizer, presets (pencil, ink, marker, soft) and a saved palette~~ (done)
 3. ~~Timing: audio track for lip-sync, camera moves, more onion skin controls~~ (done)
-4. **Layers: groups, blend modes, clipping masks** (this version)
-5. Extras: text, gradients, symmetry, rulers and guides, a reference image layer, custom shortcuts
+4. ~~Layers: groups, blend modes, clipping masks~~ (done)
+5. Extras: ~~symmetry, rulers and guides, a reference image layer~~ (this version); text, gradients, custom shortcuts
 
 Later: MP4 export and an installable app for iPad. Importing photos of paper drawings is parked.

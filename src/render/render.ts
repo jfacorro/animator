@@ -161,6 +161,26 @@ export function tintedBitmap(d: Drawing, color: string, w: number, h: number): H
   });
 }
 
+// Reference images load asynchronously: whoever painted asks to be told when one arrives.
+const images = new Map<string, HTMLImageElement>();
+const imageListeners = new Set<() => void>();
+/** Call `fn` whenever a reference image finishes loading. Returns an unsubscribe function. */
+export function onImageLoad(fn: () => void): () => void {
+  imageListeners.add(fn);
+  return () => imageListeners.delete(fn);
+}
+/** The decoded image, or null while it loads. */
+export function loadedImage(data: string): HTMLImageElement | null {
+  let img = images.get(data);
+  if (!img) {
+    img = new Image();
+    img.onload = () => imageListeners.forEach((fn) => fn());
+    img.src = data;
+    images.set(data, img);
+  }
+  return img.complete && img.naturalWidth ? img : null;
+}
+
 export interface OnionOptions {
   /** The layer to show onion skins for, or null for every visible layer. */
   layerId: string | null;
@@ -176,8 +196,10 @@ export interface ComposeOptions {
   paper: boolean;
   onion?: OnionOptions | null;
   includeHidden?: boolean;
-  /** A stroke in progress, drawn into this layer's current drawing. */
-  live?: { layerId: string; stroke: Stroke } | null;
+  /** Strokes in progress (with their symmetry copies), drawn into this layer's current drawing. */
+  live?: { layerId: string; strokes: Stroke[] } | null;
+  /** Show reference image layers (on screen only: never in exports). */
+  references?: boolean;
   /** Frame the scene through the camera (playback and export). */
   camera?: boolean;
 }
@@ -221,6 +243,15 @@ export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, fr
 
   /** The layer's picture at this frame (with any stroke in progress), or null when empty. */
   const picture = (layer: Layer): CanvasImageSource | null => {
+    const ref = layer.reference;
+    if (ref) {
+      const img = opts.references ? loadedImage(ref.data) : null;
+      if (!img) return null;
+      const rctx = borrow(w, h);
+      rctx.imageSmoothingQuality = 'high';
+      rctx.drawImage(img, ref.x, ref.y, ref.width, ref.height);
+      return rctx.canvas; // given back after the frame
+    }
     const i = celIndexAt(layer, frame);
     const id = i >= 0 ? layer.cels[i].drawingId : null;
     const d = id ? project.drawings[id] : null;
@@ -228,7 +259,7 @@ export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, fr
       // Base drawing plus the stroke in progress, so the eraser previews too.
       const sctx = borrow(w, h);
       if (d) sctx.drawImage(drawingBitmap(d, w, h), 0, 0);
-      paintStroke(sctx, opts.live.stroke, true);
+      for (const s of opts.live.strokes) paintStroke(sctx, s, true);
       return sctx.canvas; // given back after the frame
     }
     return d && d.strokes.length ? drawingBitmap(d, w, h) : null;
@@ -236,7 +267,7 @@ export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, fr
 
   const onionSkins = (target: CanvasRenderingContext2D, layer: Layer, locked: boolean) => {
     const onion = opts.onion;
-    if (!onion || !(onion.layerId === layer.id || (onion.layerId === null && !locked))) return;
+    if (!onion || layer.reference || !(onion.layerId === layer.id || (onion.layerId === null && !locked))) return;
     const i = celIndexAt(layer, frame);
     // Past the end of the layer, the previous drawings are the last ones.
     const anchor = i >= 0 ? i : layer.cels.length;

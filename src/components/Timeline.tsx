@@ -193,7 +193,7 @@ export function Timeline(props: Props) {
     <section className="timeline" aria-label="Timeline">
       <div className="timeline-bar">
         <span className="panel-title" style={{ color: 'var(--text)' }}>Timeline</span>
-        <span>{cel ? (cel.drawingId ? 'Drawing holds for' : 'Blank holds for') : 'No drawing here yet'}</span>
+        <span>{active?.reference ? 'Reference image: shows on every frame' : cel ? (cel.drawingId ? 'Drawing holds for' : 'Blank holds for') : 'No drawing here yet'}</span>
         <div className="group">
           {[1, 2, 3, 4].map((h) => (
             <button key={h} className={`btn small${cel?.hold === h ? ' on' : ''}`} title={`Show the selected drawing for ${h} frame${h === 1 ? '' : 's'}${h === 2 ? ' ("on twos")' : ''}`} disabled={!cel || playing} onClick={() => props.onHold(h)}>

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { drawingAt, layerLength, type Layer, type LayerGroup, type Project } from '../model/project';
 import { BLEND_MODES } from '../model/groups';
-import { drawingBitmap, PAPER } from '../render/render';
+import { drawingBitmap, loadedImage, onImageLoad, PAPER } from '../render/render';
 import * as I from './Icons';
 import { layerDrops, useLayerDrag, type DragKind, type Drop } from './useLayerDrag';
 
@@ -39,6 +39,7 @@ interface Props {
   onUngroup: (groupId: string) => void;
   onRemoveGroup: (groupId: string) => void;
   onOnionChange: (onion: OnionState) => void;
+  onAddReference: () => void;
 }
 
 export function LayersPanel(props: Props) {
@@ -85,7 +86,10 @@ export function LayersPanel(props: Props) {
     <aside className="layers" aria-label="Layers">
       <div className="panel-head">
         <span className="panel-title">Layers</span>
-        <button className="icon-btn sm" aria-label="Add layer" title="Add a layer above the selected one" onClick={props.onAdd}><I.Plus /></button>
+        <span className="head-btns">
+          <button className="icon-btn sm" aria-label="Add reference image" title="Add a picture to trace over. It shows on every frame, is never exported, and can't be drawn on." onClick={props.onAddReference}><I.Image /></button>
+          <button className="icon-btn sm" aria-label="Add layer" title="Add a layer above the selected one" onClick={props.onAdd}><I.Plus /></button>
+        </span>
       </div>
       <div className="layer-list">{rows}</div>
       <div className="layer-actions">
@@ -103,7 +107,7 @@ export function LayersPanel(props: Props) {
           <button className="icon-btn sm" aria-label="Delete group" title="Delete the group and its layers" disabled={project.layers.every((l) => l.groupId === group.id)}
             onClick={() => { if (window.confirm(`Delete ${group.name} and its layers?`)) props.onRemoveGroup(group.id); }}><I.Trash /></button>
         ) : (
-          <button className="icon-btn sm" aria-label="Delete layer" title="Delete layer" disabled={project.layers.length <= 1} onClick={() => props.onRemove(activeLayerId)}><I.Trash /></button>
+          <button className="icon-btn sm" aria-label="Delete layer" title="Delete layer" disabled={!project.layers.some((l) => l.id !== activeLayerId && !l.reference)} onClick={() => props.onRemove(activeLayerId)}><I.Trash /></button>
         )}
       </div>
       {opacityTarget && (
@@ -132,7 +136,7 @@ export function LayersPanel(props: Props) {
               {BLEND_MODES.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
           </label>
-          {!group && active && (
+          {!group && active && !active.reference && (
             <label className="row" title={isBottom ? 'There is no layer below this one to clip to' : 'Clipping mask: only show this layer where the layer below it has paint. Great for shading and colour inside the lines.'}>
               Clip to layer below
               <input type="checkbox" disabled={!!isBottom && !active.clip} checked={!!active.clip} onChange={(e) => props.onUpdate(active.id, { clip: e.target.checked })} />
@@ -182,14 +186,14 @@ function LayerRow({ layer, project, frame, activeLayerId, selectedGroupId, onSel
   const [renaming, setRenaming] = useState(false);
   const drawings = layer.cels.filter((c) => c.drawingId).length;
   const length = layerLength(layer);
-  const meta = `${drawings} drawing${drawings === 1 ? '' : 's'} · ${length} frame${length === 1 ? '' : 's'}`;
+  const meta = layer.reference ? 'Reference image · not exported' : `${drawings} drawing${drawings === 1 ? '' : 's'} · ${length} frame${length === 1 ? '' : 's'}`;
   const isActive = layer.id === activeLayerId && !selectedGroupId;
 
   return (
     <div
       {...dragProps}
       className={`layer-row${isActive ? ' active' : ''}${layer.visible && !groupHidden ? '' : ' hidden'}${inGroup ? ' in-group' : ''}${layer.clip ? ' clipped' : ''}${dragClass}`}
-      title="Click to draw on this layer. Drag it up or down to change the stacking order."
+      title={layer.reference ? 'A picture to trace over. Select it and use the Lasso tool to move or resize it. Drag it up or down to change the stacking order.' : 'Click to draw on this layer. Drag it up or down to change the stacking order.'}
       onClick={() => { onSelectGroup(null); onSelect(layer.id); }}
       aria-current={isActive}
     >
@@ -233,14 +237,21 @@ function LayerRow({ layer, project, frame, activeLayerId, selectedGroupId, onSel
 function Thumb({ project, layer, frame }: { project: Project; layer: Layer; frame: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const drawing = drawingAt(project, layer, frame);
+  const ref$ = layer.reference;
+  const [loads, setLoads] = useState(0);
+  useEffect(() => (ref$ ? onImageLoad(() => setLoads((n) => n + 1)) : undefined), [ref$]);
   useEffect(() => {
     const ctx = ref.current?.getContext('2d');
     if (!ctx) return;
     const { width: w, height: h } = ref.current!;
     ctx.fillStyle = PAPER;
     ctx.fillRect(0, 0, w, h);
-    if (drawing?.strokes.length) ctx.drawImage(drawingBitmap(drawing, project.width, project.height), 0, 0, w, h);
-  }, [drawing, project.width, project.height]);
+    if (ref$) {
+      const img = loadedImage(ref$.data);
+      const k = w / project.width;
+      if (img) ctx.drawImage(img, ref$.x * k, ref$.y * (h / project.height), ref$.width * k, ref$.height * (h / project.height));
+    } else if (drawing?.strokes.length) ctx.drawImage(drawingBitmap(drawing, project.width, project.height), 0, 0, w, h);
+  }, [drawing, ref$, loads, project.width, project.height]);
   return <canvas ref={ref} className="layer-thumb" width={104} height={60} aria-hidden="true" />;
 }
 

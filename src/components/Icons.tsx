@@ -50,3 +50,5 @@ export const Sound = () => <Icon size={16}><path d="M4 9v6h4l5 4V5L8 9z" /><path
 export const Mute = () => <Icon size={16}><path d="M4 9v6h4l5 4V5L8 9z" /><path d="M17 9l5 6M22 9l-5 6" /></Icon>;
 export const Diamond = () => <Icon size={12} fill="currentColor"><path d="M12 3l9 9-9 9-9-9z" /></Icon>;
 export const Folder = () => <Icon size={16}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></Icon>;
+export const Ruler = () => <Icon size={16}><path d="M3 15L15 3l6 6L9 21z" /><path d="M7 11l2 2M10 8l2 2M13 5l2 2" /></Icon>;
+export const Image = () => <Icon size={16}><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M21 17l-5-5-9 8" /></Icon>;
