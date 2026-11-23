@@ -112,8 +112,8 @@ src/
 
 Computer first: the standard tools of a digital 2D animation app.
 
-1. **Canvas navigation and copy/paste**: zoom, pan, rotate, mirror, fit; copy and paste drawings between frames and layers (done)
-2. Brushes: opacity, stabilizer, presets (pencil, ink, marker, soft) and a saved palette
+1. ~~Canvas navigation and copy/paste: zoom, pan, rotate, mirror, fit~~ (done)
+2. ~~Brushes: opacity, stabilizer, presets (pencil, ink, marker, soft) and a saved palette~~ (done)
 3. ~~Timing: audio track for lip-sync, camera moves, more onion skin controls~~ (done)
 4. **Layers: groups, blend modes, clipping masks** (this version)
 5. Extras: text, gradients, symmetry, rulers and guides, a reference image layer, custom shortcuts
