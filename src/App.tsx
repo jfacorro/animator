@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ExportDialog } from './components/ExportDialog';
 import * as I from './components/Icons';
 import { DEFAULT_ONION, LayersPanel, type OnionState } from './components/LayersPanel';
+import { Splitter } from './components/Splitter';
 import { Stage, type BrushSettings, type Tool } from './components/Stage';
 import { Timeline, type FrameAction } from './components/Timeline';
 import { commit, initHistory, redo, undo, type History } from './model/history';
@@ -37,6 +38,19 @@ const PALETTE_KEY = 'animator:palette';
 const BRUSH_KEY = 'animator:brush';
 const ONION_KEY = 'animator:onion';
 const SCRUB_KEY = 'animator:scrub';
+const PANELS_KEY = 'animator:panels';
+
+interface Panels {
+  tools: number;
+  layers: number;
+  timeline: number;
+  hideTools: boolean;
+  hideLayers: boolean;
+  hideTimeline: boolean;
+}
+const DEFAULT_PANELS: Panels = { tools: 60, layers: 280, timeline: 220, hideTools: false, hideLayers: false, hideTimeline: false };
+const PANEL_LIMITS = { tools: [52, 160], layers: [200, 560], timeline: [110, 640] } as const;
+const clampPanel = (k: keyof typeof PANEL_LIMITS, v: number) => Math.round(Math.min(PANEL_LIMITS[k][1], Math.max(PANEL_LIMITS[k][0], v)));
 const MAX_PALETTE = 24;
 
 const INK = PRESETS.find((p) => p.id === 'ink')!;
@@ -106,6 +120,17 @@ export default function App() {
   const keepSelection = useRef<number[] | null>(null);
 
   const length = P.sceneLength(project);
+  const [panels, setPanels] = useState<Panels>(() => ({ ...DEFAULT_PANELS, ...loadPref<Partial<Panels>>(PANELS_KEY, {}, (v) => typeof v === 'object') }));
+  useEffect(() => { savePref(PANELS_KEY, panels); }, [panels]);
+  /** Panel size when a resize drag started. */
+  const panelStart = useRef<Panels | null>(null);
+  const resizePanel = (k: 'tools' | 'layers' | 'timeline') => (grow: number, done: boolean) => {
+    if (!panelStart.current) panelStart.current = panels;
+    const base = panelStart.current[k];
+    setPanels((p) => ({ ...p, [k]: clampPanel(k, base + grow) }));
+    if (done) panelStart.current = null;
+  };
+  const togglePanel = (k: 'hideTools' | 'hideLayers' | 'hideTimeline') => setPanels((p) => ({ ...p, [k]: !p[k] }));
   const [scrub, setScrub] = useState(() => loadPref(SCRUB_KEY, true, (v) => typeof v === 'boolean'));
   useEffect(() => { savePref(SCRUB_KEY, scrub); }, [scrub]);
   useAudioPlayback(project, frame, playing, scrub);
@@ -383,6 +408,14 @@ export default function App() {
       }
       if (mod && key === 'v') { e.preventDefault(); pasteStrokes(activeLayerId, frame); return; }
       if (mod) return;
+      if (key === 'tab' && !e.shiftKey) {
+        e.preventDefault();
+        setPanels((p) => {
+          const anyShown = !p.hideTools || !p.hideLayers || !p.hideTimeline;
+          return { ...p, hideTools: anyShown, hideLayers: anyShown, hideTimeline: anyShown };
+        });
+        return;
+      }
       if (key === ' ') {
         e.preventDefault();
         if (!e.repeat) { spacePanned.current = false; setSpaceHeld(true); }
@@ -668,7 +701,7 @@ export default function App() {
       </div>
 
       <div className="workspace">
-        <nav className="tool-rail" aria-label="Tools">
+        {!panels.hideTools && <nav className={`tool-rail${panels.tools >= 100 ? ' wide' : ''}`} aria-label="Tools" style={{ width: panels.tools }}>
           {TOOLS.map((t) => (
             <button
               key={t.id} className={`icon-btn${tool === t.id ? ' on' : ''}`} aria-label={t.name} aria-pressed={tool === t.id}
@@ -680,7 +713,8 @@ export default function App() {
           <div className="rail-sep" />
           <button className="icon-btn" aria-label="Undo" title="Undo (Ctrl+Z)" disabled={!history.past.length} onClick={() => setHistory(undo)}><I.Undo /></button>
           <button className="icon-btn" aria-label="Redo" title="Redo (Ctrl+Shift+Z)" disabled={!history.future.length} onClick={() => setHistory(redo)}><I.Redo /></button>
-        </nav>
+        </nav>}
+        <Splitter side="left" label="the tools" collapsed={panels.hideTools} onResize={resizePanel('tools')} onToggle={() => togglePanel('hideTools')} />
 
         <Stage
           project={project} frame={frame} activeLayerId={activeLayerId} tool={tool} brush={brush} onion={onion$}
@@ -692,7 +726,8 @@ export default function App() {
           }}
         />
 
-        <LayersPanel
+        <Splitter side="right" label="the layers panel" collapsed={panels.hideLayers} onResize={resizePanel('layers')} onToggle={() => togglePanel('hideLayers')} />
+        {!panels.hideLayers && <div className="layers-wrap" style={{ width: panels.layers }}><LayersPanel
           project={project}
           frame={frame}
           activeLayerId={activeLayerId}
@@ -718,10 +753,11 @@ export default function App() {
           onRemoveGroup={(id) => { apply((p) => removeGroup(p, id)); setSelectedGroupId(null); }}
           onUpdate={(id, patch, record = true) => apply((p) => P.updateLayer(p, id, patch), record)}
           onOnionChange={setOnion}
-        />
+        /></div>}
       </div>
 
-      <Timeline
+      <Splitter side="bottom" label="the timeline" collapsed={panels.hideTimeline} onResize={resizePanel('timeline')} onToggle={() => togglePanel('hideTimeline')} />
+      {!panels.hideTimeline && <div className="timeline-wrap" style={{ height: panels.timeline }}><Timeline
         project={project}
         frame={frame}
         activeLayerId={activeLayerId}
@@ -745,7 +781,7 @@ export default function App() {
         onMoveCel={onMoveCel}
         onUpdateLayer={(id, patch) => apply((p) => P.updateLayer(p, id, patch))}
         onMoveLayerTo={(id, gap, group) => apply((p) => P.moveLayerToGap(p, id, gap, group))}
-      />
+      /></div>}
 
       {toast && <div className="toast" role="status">{toast}</div>}
       {exporting && <ExportDialog project={project} onClose={() => setExporting(false)} />}
