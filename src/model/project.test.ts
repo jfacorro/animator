@@ -250,3 +250,9 @@ it('drags a layer into a gap in the stack', () => {
   const top = p.layers[3].id;
   expect(names(moveLayerToGap(p, top, 0))).toEqual(['A', 'Background', 'Layer 1', 'B']);
 });
+
+it('stretches the scene to the sound and the camera', () => {
+  const p = createProject(); // 2 frames at 12 fps
+  expect(sceneLength({ ...p, audio: { name: 'a', data: '', start: 3, volume: 1, duration: 1.5 } })).toBe(21);
+  expect(sceneLength({ ...p, camera: [{ frame: 30, x: 0, y: 0, zoom: 1, rotation: 0 }] })).toBe(31);
+});

@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ExportDialog } from './components/ExportDialog';
 import * as I from './components/Icons';
-import { LayersPanel, type OnionState } from './components/LayersPanel';
+import { DEFAULT_ONION, LayersPanel, type OnionState } from './components/LayersPanel';
 import { Stage, type BrushSettings, type Tool } from './components/Stage';
 import { Timeline, type FrameAction } from './components/Timeline';
 import { commit, initHistory, redo, undo, type History } from './model/history';
 import { scaleAbout, strokeBounds, translate, unionBoxes } from './model/geometry';
 import * as P from './model/project';
+import { cameraAt, hasCamera, keyAt, removeCameraKey, setCameraKey } from './model/camera';
+import { readAudioFile, useAudioPlayback } from './audio';
 import { matchingPreset, PRESETS, type BrushPreset } from './model/brushes';
 import {
   canSaveToFile, filePermission, loadCurrentProject, loadLinkedFile, pickOpenFile, pickSaveFile, readProjectFile, rememberLinkedFile,
@@ -24,6 +26,7 @@ const TOOLS: { id: Tool; name: string; key: string; help: string; Icon: () => Re
   { id: 'fill', name: 'Fill', key: 'g', help: 'fill a closed area with colour', Icon: I.Bucket },
   { id: 'eyedropper', name: 'Eyedropper', key: 'i', help: 'pick a colour from the canvas', Icon: I.Dropper },
   { id: 'select', name: 'Lasso select', key: 's', help: 'select strokes to move, resize, flip or delete', Icon: I.Lasso },
+  { id: 'camera', name: 'Camera', key: 'k', help: 'frame the shot: pan, zoom and rotate the camera, keyed over time', Icon: I.Camera },
 ];
 const TOOL_KEYS: Record<string, Tool> = Object.fromEntries(TOOLS.map((t) => [t.key, t.id]));
 const COLOUR_TOOLS: Tool[] = ['brush', 'line', 'rect', 'ellipse', 'fill', 'eyedropper'];
@@ -31,6 +34,8 @@ const COLOUR_TOOLS: Tool[] = ['brush', 'line', 'rect', 'ellipse', 'fill', 'eyedr
 const DEFAULT_PALETTE = ['#1a1a1a', '#6b6f78', '#e5534b', '#f08a3a', '#f2c94c', '#6faf6a', '#5b8fd9', '#9b6fd6', '#ffffff'];
 const PALETTE_KEY = 'animator:palette';
 const BRUSH_KEY = 'animator:brush';
+const ONION_KEY = 'animator:onion';
+const SCRUB_KEY = 'animator:scrub';
 const MAX_PALETTE = 24;
 
 const INK = PRESETS.find((p) => p.id === 'ink')!;
@@ -75,7 +80,8 @@ export default function App() {
     ...b, size: p.size, opacity: p.opacity, smoothing: p.smoothing, stabilizer: p.stabilizer, thinning: p.thinning, softness: p.softness, pressure: p.thinning > 0,
   }));
   const [selection, setSelection] = useState<number[] | null>(null);
-  const [onion, setOnion] = useState<OnionState>({ enabled: true, before: 1, after: 1 });
+  const [onion, setOnion] = useState<OnionState>(() => ({ ...DEFAULT_ONION, ...loadPref<Partial<OnionState>>(ONION_KEY, {}, (v) => typeof v === 'object') }));
+  useEffect(() => { savePref(ONION_KEY, onion); }, [onion]);
   const [playing, setPlaying] = useState(false);
   const [loop, setLoop] = useState(true);
   const [exporting, setExporting] = useState(false);
@@ -97,6 +103,18 @@ export default function App() {
   const keepSelection = useRef<number[] | null>(null);
 
   const length = P.sceneLength(project);
+  const [scrub, setScrub] = useState(() => loadPref(SCRUB_KEY, true, (v) => typeof v === 'boolean'));
+  useEffect(() => { savePref(SCRUB_KEY, scrub); }, [scrub]);
+  useAudioPlayback(project, frame, playing, scrub);
+  const audioInput = useRef<HTMLInputElement>(null);
+  const addAudio = async (file: File) => {
+    try {
+      const audio = await readAudioFile(file);
+      apply((p) => ({ ...p, audio }));
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Could not add that sound.');
+    }
+  };
 
   /** Change the project. `record: false` previews a change (e.g. while dragging a slider) without an undo step. */
   const apply = useCallback((fn: (p: P.Project) => P.Project, record = true) => {
@@ -333,7 +351,10 @@ export default function App() {
   }, [apply, project, copyStrokes, pasteStrokes]);
 
   const onion$ = useMemo(
-    () => (onion.enabled && !playing && (onion.before || onion.after) ? { layerId: activeLayerId, before: onion.before, after: onion.after } : null),
+    () => (onion.enabled && !playing && (onion.before || onion.after) ? {
+      layerId: onion.allLayers ? null : activeLayerId, before: onion.before, after: onion.after,
+      opacity: onion.opacity, beforeColor: onion.beforeColor, afterColor: onion.afterColor,
+    } : null),
     [onion, playing, activeLayerId],
   );
 
@@ -368,6 +389,7 @@ export default function App() {
       else if (key === 'home') goTo(0);
       else if (key === 'end') goTo(length - 1);
       else if (selection && (key === 'delete' || key === 'backspace')) { e.preventDefault(); deleteSelection(); }
+      else if (tool === 'camera' && (key === 'delete' || key === 'backspace') && keyAt(project, frame)) { e.preventDefault(); apply((p) => removeCameraKey(p, frame)); }
       else if (selection && key === 'escape') setSelection(null);
       else if (TOOL_KEYS[key]) setTool(TOOL_KEYS[key]);
       else if (key === 'n') newDrawing();
@@ -394,7 +416,7 @@ export default function App() {
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
     };
-  }, [exporting, frame, length, tool, togglePlay, goTo, newDrawing, duplicate, selection, deleteSelection, copyStrokes, pasteStrokes, activeLayerId, activeLayer, apply]);
+  }, [exporting, frame, length, tool, togglePlay, goTo, newDrawing, duplicate, selection, deleteSelection, copyStrokes, pasteStrokes, activeLayerId, activeLayer, apply, project]);
 
   const newProject = () => {
     setMenuOpen(false);
@@ -496,8 +518,8 @@ export default function App() {
           <button className={`btn small${loop ? ' on' : ''}`} style={{ marginLeft: 6 }} aria-pressed={loop} title="Start again from the first frame when playback reaches the end" onClick={() => setLoop((l) => !l)}>Loop</button>
         </div>
         <div className="spacer" />
-        <button className={`btn${onion.enabled ? ' on' : ''}`} aria-pressed={onion.enabled} title="Show the previous drawings in red and the next ones in blue, faintly, while you draw (O)" onClick={() => setOnion((o) => ({ ...o, enabled: !o.enabled }))}>
-          <span className="onion-dots"><i style={{ background: 'var(--onion-before)' }} /><i style={{ background: 'var(--onion-after)' }} /></span>
+        <button className={`btn${onion.enabled ? ' on' : ''}`} aria-pressed={onion.enabled} title="Show the previous and next drawings faintly while you draw (O). Set how many, their colours and strength in the Layers panel." onClick={() => setOnion((o) => ({ ...o, enabled: !o.enabled }))}>
+          <span className="onion-dots"><i style={{ background: onion.beforeColor }} /><i style={{ background: onion.afterColor }} /></span>
           Onion skin
         </button>
         <div className="menu">
@@ -505,6 +527,7 @@ export default function App() {
           {menuOpen && (
             <div className="menu-list" onMouseLeave={() => setMenuOpen(false)}>
               <button onClick={newProject} title="Start a blank animation, replacing the current one">New animation</button>
+              <button onClick={() => { setMenuOpen(false); audioInput.current?.click(); }} title="Add a sound (MP3, WAV…) to time the animation to, for example dialogue for lip-sync. It's saved inside the animation.">{project.audio ? 'Replace sound…' : 'Add sound…'}</button>
               <button onClick={openProject} title={canSaveToFile() ? 'Open an animation file. Changes then save back to it automatically.' : 'Open an animation saved with Save to file'}>Open from file…</button>
               {canSaveToFile() ? (
                 <>
@@ -516,6 +539,10 @@ export default function App() {
               )}
             </div>
           )}
+          <input
+            ref={audioInput} type="file" accept="audio/*" hidden
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) addAudio(f); e.target.value = ''; }}
+          />
           <input
             ref={fileInput} type="file" accept=".json,application/json" hidden
             onChange={(e) => { const f = e.target.files?.[0]; if (f) openFile(f); e.target.value = ''; }}
@@ -583,6 +610,36 @@ export default function App() {
             <button className="btn small" title="Clear the selection (Esc)" onClick={() => setSelection(null)}>Deselect</button>
           </>
         )}
+        {tool === 'camera' && (() => {
+          const view = cameraAt(project, frame);
+          const key = keyAt(project, frame);
+          const setView = (patch: Partial<typeof view>, record = true) => apply((p) => setCameraKey(p, frame, { ...cameraAt(p, frame), ...patch }), record);
+          return (
+            <>
+              <label title="How close the camera is. 100% shows the whole canvas.">Zoom
+                <input type="range" min={-100} max={200} value={Math.round(Math.log2(view.zoom) * 100)}
+                  onChange={(e) => setView({ zoom: Math.pow(2, Number(e.target.value) / 100) }, false)}
+                  onPointerUp={(e) => setView({ zoom: Math.pow(2, Number((e.target as HTMLInputElement).value) / 100) })} />
+                <span className="value">{Math.round(view.zoom * 100)}%</span>
+              </label>
+              <label title="Tilt the camera">Rotation
+                <input type="range" min={-180} max={180} value={Math.round(view.rotation)}
+                  onChange={(e) => setView({ rotation: Number(e.target.value) }, false)}
+                  onPointerUp={(e) => setView({ rotation: Number((e.target as HTMLInputElement).value) })} />
+                <span className="value">{Math.round(view.rotation)}°</span>
+              </label>
+              {key ? (
+                <button className="btn small" title="Remove the camera key on this frame (Delete)" onClick={() => apply((p) => removeCameraKey(p, frame))}>Delete key</button>
+              ) : (
+                <button className="btn small" title="Keep the camera where it is at this frame, as a key" onClick={() => apply((p) => setCameraKey(p, frame, cameraAt(p, frame)))}>Add key</button>
+              )}
+              {hasCamera(project) && (
+                <button className="btn small" title="Remove every camera key so the whole canvas shows again" onClick={() => apply((p) => ({ ...p, camera: undefined }))}>Reset camera</button>
+              )}
+              <span className="hint">Drag the blue frame to move it, a corner to zoom. Changes add a key on this frame. To remove a key: Delete here, or right-click its diamond in the timeline.</span>
+            </>
+          );
+        })()}
         {COLOUR_TOOLS.includes(tool) && (
           <div className="swatches" role="group" aria-label="Colour">
             Colour
@@ -625,7 +682,7 @@ export default function App() {
         <Stage
           project={project} frame={frame} activeLayerId={activeLayerId} tool={tool} brush={brush} onion={onion$}
           selection={selection} onSelectionChange={setSelection} onCommit={onCommit}
-          panKey={spaceHeld} onPanned={() => { spacePanned.current = true; }}
+          panKey={spaceHeld} onPanned={() => { spacePanned.current = true; }} playing={playing}
           onPickColor={(color) => {
             setBrush((b) => ({ ...b, color }));
             if (tool === 'eyedropper') setTool('brush');
@@ -665,6 +722,13 @@ export default function App() {
         onDelete={() => apply((p) => P.deleteCelAt(p, activeLayerId, frame))}
         onFrameAction={onFrameAction}
         canPaste={!!clipboard}
+        showCamera={tool === 'camera' || hasCamera(project)}
+        scrub={scrub}
+        onScrubChange={setScrub}
+        onAudioChange={(patch, record = true) => apply((p) => (p.audio ? { ...p, audio: { ...p.audio, ...patch } } : p), record)}
+        onRemoveAudio={() => apply((p) => ({ ...p, audio: null }))}
+        onAddAudio={() => audioInput.current?.click()}
+        onRemoveCameraKey={(f) => apply((p) => removeCameraKey(p, f))}
         onMoveCel={onMoveCel}
         onUpdateLayer={(id, patch) => apply((p) => P.updateLayer(p, id, patch))}
         onMoveLayerTo={(id, gap) => apply((p) => P.moveLayerToGap(p, id, gap))}

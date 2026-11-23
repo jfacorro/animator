@@ -45,3 +45,7 @@ export const RotateLeft = () => <Icon size={16}><path d="M4 4v5h5" /><path d="M4
 export const RotateRight = () => <Icon size={16}><path d="M20 4v5h-5" /><path d="M19.5 9A8 8 0 1 0 18 17" /></Icon>;
 export const Mirror = () => <Icon size={16}><path d="M12 3v18" strokeDasharray="2 2" /><path d="M9 7L3 17h6zM15 7l6 10h-6z" /></Icon>;
 export const Copy = () => <Icon size={16}><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3" /></Icon>;
+export const Camera = () => <Icon size={20}><rect x="3" y="7" width="13" height="11" rx="2" /><path d="M16 11l5-3v9l-5-3" /></Icon>;
+export const Sound = () => <Icon size={16}><path d="M4 9v6h4l5 4V5L8 9z" /><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11" /></Icon>;
+export const Mute = () => <Icon size={16}><path d="M4 9v6h4l5 4V5L8 9z" /><path d="M17 9l5 6M22 9l-5 6" /></Icon>;
+export const Diamond = () => <Icon size={12} fill="currentColor"><path d="M12 3l9 9-9 9-9-9z" /></Icon>;

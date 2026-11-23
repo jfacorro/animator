@@ -55,6 +55,31 @@ export interface Layer {
   cels: Cel[];
 }
 
+/** A camera position at one frame. Frames between keys are eased between them. */
+export interface CameraKey {
+  frame: number;
+  /** Centre of the camera's view, in project px. */
+  x: number;
+  y: number;
+  /** 1 shows the whole canvas; 2 shows half of it, twice as big. */
+  zoom: number;
+  /** Degrees, clockwise. */
+  rotation: number;
+}
+
+/** A sound to time the animation to. */
+export interface AudioTrack {
+  name: string;
+  /** The file as a data: URL, so it travels inside the project file. */
+  data: string;
+  /** Frame where the sound starts. */
+  start: number;
+  /** Length in seconds. */
+  duration: number;
+  /** 0–1. */
+  volume: number;
+}
+
 export interface Project {
   version: 1;
   id: string;
@@ -65,6 +90,9 @@ export interface Project {
   /** Layers from bottom (index 0) to top. */
   layers: Layer[];
   drawings: Record<string, Drawing>;
+  /** Camera keys sorted by frame. None means the camera shows the whole canvas. */
+  camera?: CameraKey[];
+  audio?: AudioTrack | null;
 }
 
 export const MAX_HOLD = 24;
@@ -99,8 +127,12 @@ export function layerLength(layer: Layer): number {
 }
 
 /** Length of the whole scene: the longest layer, at least 1 frame. */
+/** Frames in the scene: the longest layer, stretched to fit the sound and the last camera key. */
 export function sceneLength(project: Project): number {
-  return Math.max(1, ...project.layers.map(layerLength));
+  const audio = project.audio;
+  const audioEnd = audio?.duration ? audio.start + Math.ceil(audio.duration * project.fps) : 0;
+  const cameraEnd = project.camera?.length ? project.camera[project.camera.length - 1].frame + 1 : 0;
+  return Math.max(1, audioEnd, cameraEnd, ...project.layers.map(layerLength));
 }
 
 /** Index of the cel showing at `frame` (0-based), or -1 past the layer's end. */

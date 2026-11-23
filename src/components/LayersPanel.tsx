@@ -8,7 +8,15 @@ export interface OnionState {
   enabled: boolean;
   before: number;
   after: number;
+  /** Strength of the nearest onion skin, 0–1. */
+  opacity: number;
+  /** Show onion skins on every unlocked visible layer, not only the selected one. */
+  allLayers: boolean;
+  beforeColor: string;
+  afterColor: string;
 }
+
+export const DEFAULT_ONION: OnionState = { enabled: true, before: 1, after: 1, opacity: 0.45, allLayers: false, beforeColor: '#e5534b', afterColor: '#4c8df0' };
 
 interface Props {
   project: Project;
@@ -68,19 +76,34 @@ export function LayersPanel(props: Props) {
           <span className="panel-title" style={{ color: 'var(--text)' }}>Onion skin</span>
           <input type="checkbox" checked={onion.enabled} onChange={(e) => props.onOnionChange({ ...onion, enabled: e.target.checked })} />
         </label>
-        <label className="row" title="How many earlier drawings to show, in red">
-          <span><i className="dot" style={{ background: 'var(--onion-before)' }} />Drawings before</span>
-          <select value={onion.before} onChange={(e) => props.onOnionChange({ ...onion, before: Number(e.target.value) })}>
-            {[0, 1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}
+        <div className="row" title="How many earlier drawings to show. Click the colour dot to change their colour.">
+          <span className="onion-label">
+            <input type="color" className="dot-input" aria-label="Colour of earlier drawings" value={onion.beforeColor} onChange={(e) => props.onOnionChange({ ...onion, beforeColor: e.target.value })} />
+            Drawings before
+          </span>
+          <select aria-label="Drawings before" value={onion.before} onChange={(e) => props.onOnionChange({ ...onion, before: Number(e.target.value) })}>
+            {[0, 1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
-        </label>
-        <label className="row" title="How many later drawings to show, in blue">
-          <span><i className="dot" style={{ background: 'var(--onion-after)' }} />Drawings after</span>
-          <select value={onion.after} onChange={(e) => props.onOnionChange({ ...onion, after: Number(e.target.value) })}>
-            {[0, 1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}
+        </div>
+        <div className="row" title="How many later drawings to show. Click the colour dot to change their colour.">
+          <span className="onion-label">
+            <input type="color" className="dot-input" aria-label="Colour of later drawings" value={onion.afterColor} onChange={(e) => props.onOnionChange({ ...onion, afterColor: e.target.value })} />
+            Drawings after
+          </span>
+          <select aria-label="Drawings after" value={onion.after} onChange={(e) => props.onOnionChange({ ...onion, after: Number(e.target.value) })}>
+            {[0, 1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
+        </div>
+        <label className="row" title="How strong the nearest onion skin is. Further ones fade out.">
+          Strength
+          <input type="range" min={10} max={100} value={Math.round(onion.opacity * 100)} onChange={(e) => props.onOnionChange({ ...onion, opacity: Number(e.target.value) / 100 })} />
+          <span className="value">{Math.round(onion.opacity * 100)}%</span>
         </label>
-        <span className="muted" style={{ fontSize: 11.5 }}>Shows on the selected layer only.</span>
+        <label className="row" title="Show onion skins on every visible layer that isn't locked, instead of only the selected layer">
+          All layers
+          <input type="checkbox" checked={onion.allLayers} onChange={(e) => props.onOnionChange({ ...onion, allLayers: e.target.checked })} />
+        </label>
+        <span className="muted" style={{ fontSize: 11.5 }}>{onion.allLayers ? 'Shows on every unlocked layer.' : 'Shows on the selected layer only.'}</span>
       </div>
     </aside>
   );
