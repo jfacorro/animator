@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { drawingAt, layerLength, type Layer, type Project } from '../model/project';
 import { drawingBitmap, PAPER } from '../render/render';
 import * as I from './Icons';
+import { useLayerDrag } from './useLayerDrag';
 
 export interface OnionState {
   enabled: boolean;
@@ -18,6 +19,8 @@ interface Props {
   onAdd: () => void;
   onRemove: (id: string) => void;
   onMove: (id: string, delta: number) => void;
+  /** Drag a layer into a gap in the stack, counted bottom to top. */
+  onMoveTo: (id: string, gap: number) => void;
   onUpdate: (id: string, patch: Partial<Pick<Layer, 'name' | 'visible' | 'locked' | 'opacity'>>, record?: boolean) => void;
   onOnionChange: (onion: OnionState) => void;
 }
@@ -27,6 +30,7 @@ export function LayersPanel(props: Props) {
   const active = project.layers.find((l) => l.id === activeLayerId);
   const topFirst = [...project.layers].reverse();
   const index = project.layers.findIndex((l) => l.id === activeLayerId);
+  const drag = useLayerDrag(project.layers.length, props.onMoveTo);
 
   return (
     <aside className="layers" aria-label="Layers">
@@ -35,8 +39,8 @@ export function LayersPanel(props: Props) {
         <button className="icon-btn sm" aria-label="Add layer" title="Add layer" onClick={props.onAdd}><I.Plus /></button>
       </div>
       <div className="layer-list">
-        {topFirst.map((layer) => (
-          <LayerRow key={layer.id} layer={layer} {...props} />
+        {topFirst.map((layer, i) => (
+          <LayerRow key={layer.id} layer={layer} {...props} dragProps={drag.rowProps(layer.id)} dragClass={drag.rowClass(layer.id, i)} />
         ))}
       </div>
       <div className="layer-actions">
@@ -82,7 +86,7 @@ export function LayersPanel(props: Props) {
   );
 }
 
-function LayerRow({ layer, project, frame, activeLayerId, onSelect, onUpdate }: Props & { layer: Layer }) {
+function LayerRow({ layer, project, frame, activeLayerId, onSelect, onUpdate, dragProps, dragClass }: Props & { layer: Layer; dragProps: object; dragClass: string }) {
   const [renaming, setRenaming] = useState(false);
   const drawings = layer.cels.filter((c) => c.drawingId).length;
   const length = layerLength(layer);
@@ -91,8 +95,9 @@ function LayerRow({ layer, project, frame, activeLayerId, onSelect, onUpdate }: 
 
   return (
     <div
-      className={`layer-row${isActive ? ' active' : ''}${layer.visible ? '' : ' hidden'}`}
-      title="Click to draw on this layer"
+      {...dragProps}
+      className={`layer-row${isActive ? ' active' : ''}${layer.visible ? '' : ' hidden'}${dragClass}`}
+      title="Click to draw on this layer. Drag it up or down to change the stacking order."
       onClick={() => onSelect(layer.id)}
       aria-current={isActive}
     >
@@ -108,6 +113,7 @@ function LayerRow({ layer, project, frame, activeLayerId, onSelect, onUpdate }: 
         {renaming ? (
           <input
             className="layer-rename" type="text" defaultValue={layer.name} autoFocus aria-label="Layer name"
+            onFocus={(e) => e.target.select()}
             onClick={(e) => e.stopPropagation()}
             onBlur={(e) => { onUpdate(layer.id, { name: e.target.value.trim() || layer.name }); setRenaming(false); }}
             onKeyDown={(e) => {

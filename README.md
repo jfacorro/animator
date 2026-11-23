@@ -38,7 +38,9 @@ npm run build    # static site in dist/
 - **Export.** GIFs are encoded in the browser with
   [gifenc](https://github.com/mattdesl/gifenc). Held drawings become a single
   GIF frame with a longer delay, so files stay small.
-- **Storage.** The project autosaves to IndexedDB.
+- **Storage.** The project autosaves to IndexedDB. In Chrome and Edge, *Save to
+  file…* (or *Open from file…*) links the animation to a file on disk, and every
+  change after that also saves to that file. Elsewhere, saving downloads a copy.
 
 ## Shortcuts
 
@@ -66,7 +68,7 @@ npm run build    # static site in dist/
 
 On a touch screen, pinch with two fingers to zoom, pan and rotate.
 
-In the timeline, click the selected drawing again (or right-click any drawing) for a menu to copy or paste a drawing, insert one to the left or right, duplicate, clear or delete it. Drag a drawing along its layer to move it.
+In the timeline, click the selected drawing again (or right-click any drawing) for a menu to copy or paste a drawing, insert one to the left or right, duplicate, clear or delete it. Drag a drawing along its layer to move it. Double-click a layer's name (in the timeline or the Layers panel) to rename it, and drag layers up or down in either place to change their order.
 
 ## Layout
 

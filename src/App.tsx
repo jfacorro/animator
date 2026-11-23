@@ -7,7 +7,12 @@ import { Timeline, type FrameAction } from './components/Timeline';
 import { commit, initHistory, redo, undo, type History } from './model/history';
 import { scaleAbout, strokeBounds, translate, unionBoxes } from './model/geometry';
 import * as P from './model/project';
-import { loadCurrentProject, readProjectFile, saveCurrentProject, saveProjectFile } from './storage';
+import {
+  canSaveToFile, filePermission, loadCurrentProject, loadLinkedFile, pickOpenFile, pickSaveFile, readProjectFile, rememberLinkedFile,
+  saveCurrentProject, saveProjectFile, writeProjectFile, type LinkedFile,
+} from './storage';
+
+type FileStatus = 'saved' | 'saving' | 'paused' | 'error';
 
 const TOOLS: { id: Tool; name: string; key: string; help: string; Icon: () => React.JSX.Element }[] = [
   { id: 'brush', name: 'Brush', key: 'b', help: 'draw freehand lines', Icon: I.Brush },
@@ -40,6 +45,10 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const baseRef = useRef<P.Project | null>(null);
+  /** The file on disk this animation auto-saves to, once one has been chosen with Save to file. */
+  const [linked, setLinked] = useState<LinkedFile | null>(null);
+  const [fileStatus, setFileStatus] = useState<FileStatus>('saved');
+  const lastWritten = useRef<P.Project | null>(null);
   /** Strokes copied with Ctrl+C or the frame menu. */
   const [clipboard, setClipboard] = useState<P.Stroke[] | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -69,13 +78,42 @@ export default function App() {
 
   // Load the last project from the browser, then autosave every change.
   useEffect(() => {
-    loadCurrentProject().then((saved) => {
+    Promise.all([loadCurrentProject(), loadLinkedFile()]).then(async ([saved, file]) => {
       if (saved) {
         setHistory(initHistory(saved));
         setActiveLayerId(saved.layers.at(-1)!.id);
+        lastWritten.current = saved;
+        if (file && file.projectId === saved.id) {
+          setLinked(file);
+          // After a reload the browser asks again before writing to the file.
+          setFileStatus((await filePermission(file, false).catch(() => false)) ? 'saved' : 'paused');
+        }
       }
       setLoaded(true);
     });
+  }, []);
+
+  // Auto-save to the linked file too, a moment after each change.
+  useEffect(() => {
+    if (!linked || linked.projectId !== project.id || fileStatus === 'paused' || project === lastWritten.current) return;
+    const id = window.setTimeout(async () => {
+      setFileStatus('saving');
+      try {
+        await writeProjectFile(linked, project);
+        lastWritten.current = project;
+        setFileStatus('saved');
+      } catch (err) {
+        setFileStatus(err instanceof DOMException && err.name === 'NotAllowedError' ? 'paused' : 'error');
+      }
+    }, 800);
+    return () => window.clearTimeout(id);
+  }, [project, linked, fileStatus]);
+
+  const linkFile = useCallback((file: LinkedFile | null, written: P.Project | null) => {
+    setLinked(file);
+    lastWritten.current = written;
+    setFileStatus('saved');
+    rememberLinkedFile(file);
   }, []);
   useEffect(() => {
     if (!loaded) return;
@@ -306,6 +344,7 @@ export default function App() {
     setMenuOpen(false);
     if (!window.confirm('Start a new animation? The current one will be replaced. Save it to a file first if you want to keep it.')) return;
     const p = P.createProject();
+    linkFile(null, null);
     setHistory(initHistory(p));
     setActiveLayerId(p.layers.at(-1)!.id);
     setFrame(0);
@@ -314,6 +353,7 @@ export default function App() {
   const openFile = async (file: File) => {
     try {
       const p = await readProjectFile(file);
+      linkFile(null, null);
       setHistory(initHistory(p));
       setActiveLayerId(p.layers.at(-1)!.id);
       setFrame(0);
@@ -321,6 +361,47 @@ export default function App() {
       window.alert(err instanceof Error ? err.message : 'Could not open that file.');
     }
   };
+
+  /** Open with the file picker where possible, so later changes auto-save back to that file. */
+  const openProject = async () => {
+    setMenuOpen(false);
+    if (!canSaveToFile()) { fileInput.current?.click(); return; }
+    try {
+      const r = await pickOpenFile();
+      if (!r) return;
+      setHistory(initHistory(r.project));
+      setActiveLayerId(r.project.layers.at(-1)!.id);
+      setFrame(0);
+      linkFile({ handle: r.handle, projectId: r.project.id }, r.project);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Could not open that file.');
+    }
+  };
+
+  /** Choose a file to save to; from then on every change auto-saves to it. */
+  const saveAs = async () => {
+    setMenuOpen(false);
+    if (!canSaveToFile()) { saveProjectFile(project); return; }
+    try {
+      const file = await pickSaveFile(project);
+      if (!file) return;
+      await writeProjectFile(file, project);
+      linkFile(file, project);
+      notify(`Saved. Changes now save to ${file.handle.name} automatically.`);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Could not save the file.');
+    }
+  };
+
+  const resumeFileSave = async () => {
+    if (!linked) return;
+    if (await filePermission(linked, true).catch(() => false)) {
+      lastWritten.current = null; // write the latest version straight away
+      setFileStatus('saved');
+    }
+  };
+
+  const fileLinked = linked && linked.projectId === project.id ? linked : null;
 
   const isEraser = tool === 'eraser';
   const size = isEraser ? brush.eraserSize : brush.size;
@@ -334,6 +415,15 @@ export default function App() {
           onChange={(e) => apply((p) => ({ ...p, name: e.target.value }), false)}
           onBlur={(e) => apply((p) => ({ ...p, name: e.target.value.trim() || 'Untitled animation' }))}
         />
+        {fileLinked && (
+          fileStatus === 'paused' ? (
+            <button className="file-status paused" title={`Auto-save to ${fileLinked.handle.name} is paused until you allow it again. Your work is still saved in this browser.`} onClick={resumeFileSave}>Resume saving to file</button>
+          ) : (
+            <span className={`file-status ${fileStatus}`} title={`Every change saves to ${fileLinked.handle.name} automatically`}>
+              {fileStatus === 'saving' ? 'Saving…' : fileStatus === 'error' ? `Couldn't save to ${fileLinked.handle.name}` : `Saved to ${fileLinked.handle.name}`}
+            </span>
+          )
+        )}
         <div className="spacer" />
         <div className="transport">
           <button className="icon-btn" aria-label="First frame" title="First frame (Home)" onClick={() => goTo(0)}><I.First /></button>
@@ -359,8 +449,15 @@ export default function App() {
           {menuOpen && (
             <div className="menu-list" onMouseLeave={() => setMenuOpen(false)}>
               <button onClick={newProject} title="Start a blank animation, replacing the current one">New animation</button>
-              <button onClick={() => { setMenuOpen(false); fileInput.current?.click(); }} title="Open an animation saved with Save to file">Open from file…</button>
-              <button onClick={() => { setMenuOpen(false); saveProjectFile(project); }} title="Download this animation as a file you can back up or open later. It also saves automatically in this browser.">Save to file</button>
+              <button onClick={openProject} title={canSaveToFile() ? 'Open an animation file. Changes then save back to it automatically.' : 'Open an animation saved with Save to file'}>Open from file…</button>
+              {canSaveToFile() ? (
+                <>
+                  <button onClick={saveAs} title="Choose where to save this animation. After that, every change saves to that file automatically.">{fileLinked ? 'Save as…' : 'Save to file…'}</button>
+                  {fileLinked && <button onClick={() => { setMenuOpen(false); linkFile(null, null); }} title="Keep the file as it is now and stop saving changes to it">Stop auto-saving to {fileLinked.handle.name}</button>}
+                </>
+              ) : (
+                <button onClick={saveAs} title="Download this animation as a file you can back up or open later. It also saves automatically in this browser. (Auto-saving to a file needs Chrome or Edge.)">Save to file</button>
+              )}
             </div>
           )}
           <input
@@ -457,6 +554,7 @@ export default function App() {
           }}
           onRemove={(id) => apply((p) => P.removeLayer(p, id))}
           onMove={(id, delta) => apply((p) => P.moveLayer(p, id, delta))}
+          onMoveTo={(id, gap) => apply((p) => P.moveLayerToGap(p, id, gap))}
           onUpdate={(id, patch, record = true) => apply((p) => P.updateLayer(p, id, patch), record)}
           onOnionChange={setOnion}
         />
@@ -478,6 +576,7 @@ export default function App() {
         canPaste={!!clipboard}
         onMoveCel={onMoveCel}
         onUpdateLayer={(id, patch) => apply((p) => P.updateLayer(p, id, patch))}
+        onMoveLayerTo={(id, gap) => apply((p) => P.moveLayerToGap(p, id, gap))}
       />
 
       {toast && <div className="toast" role="status">{toast}</div>}
