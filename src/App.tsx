@@ -3,6 +3,8 @@ import { ExportDialog } from './components/ExportDialog';
 import * as I from './components/Icons';
 import { DEFAULT_ONION, LayersPanel, type OnionState } from './components/LayersPanel';
 import { Splitter } from './components/Splitter';
+import { addReferenceLayer, referenceGotDrawings, type Symmetry } from './model/aids';
+import { readImageFile } from './images';
 import { Stage, type BrushSettings, type Tool } from './components/Stage';
 import { Timeline, type FrameAction } from './components/Timeline';
 import { commit, initHistory, redo, undo, type History } from './model/history';
@@ -72,6 +74,10 @@ function loadPref<T>(key: string, fallback: T, valid: (v: unknown) => boolean): 
 function savePref(key: string, value: unknown) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* not saved; fine */ }
 }
+const AIDS_KEY = 'animator:aids';
+const SYMMETRY: { id: Symmetry; name: string }[] = [
+  { id: 'off', name: 'Off' }, { id: 'x', name: 'Left–right' }, { id: 'y', name: 'Top–bottom' }, { id: 'xy', name: 'Both' },
+];
 const isHex = (c: unknown) => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c);
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 
@@ -119,6 +125,24 @@ export default function App() {
   /** Selection to keep after a paste, instead of clearing it when the drawing or tool changes. */
   const keepSelection = useRef<number[] | null>(null);
 
+  /** Drawing aids kept in this browser: symmetry and rulers. */
+  const [aids, setAids] = useState<{ symmetry: Symmetry; rulers: boolean }>(() => {
+    const v = loadPref<{ symmetry?: unknown; rulers?: unknown }>(AIDS_KEY, {}, (x) => typeof x === 'object');
+    return { symmetry: SYMMETRY.some((m) => m.id === v.symmetry) ? (v.symmetry as Symmetry) : 'off', rulers: v.rulers === true };
+  });
+  useEffect(() => { savePref(AIDS_KEY, aids); }, [aids]);
+  const imageInput = useRef<HTMLInputElement>(null);
+  const addReference = async (file: File) => {
+    try {
+      const image = await readImageFile(file, project.width, project.height);
+      apply((p) => addReferenceLayer(p, file.name.replace(/\.[^.]+$/, '') || 'Reference', image).project);
+      notify('Reference added at the bottom. Select its layer and use the Lasso tool to move or resize it.');
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Could not add that picture.');
+    }
+  };
+  const notifyRef = useRef<(text: string) => void>(() => {});
+
   const length = P.sceneLength(project);
   const [panels, setPanels] = useState<Panels>(() => ({ ...DEFAULT_PANELS, ...loadPref<Partial<Panels>>(PANELS_KEY, {}, (v) => typeof v === 'object') }));
   useEffect(() => { savePref(PANELS_KEY, panels); }, [panels]);
@@ -148,6 +172,11 @@ export default function App() {
   const apply = useCallback((fn: (p: P.Project) => P.Project, record = true) => {
     setHistory((h) => {
       const next = fn(h.present);
+      // Reference images never hold drawings: refuse edits that would give them some.
+      if (next !== h.present && referenceGotDrawings(next) && !referenceGotDrawings(h.present)) {
+        queueMicrotask(() => notifyRef.current('This is a reference image. Pick another layer to draw or add frames on.'));
+        return h;
+      }
       if (!record) {
         if (!baseRef.current) baseRef.current = h.present;
         return { ...h, present: next };
@@ -326,8 +355,9 @@ export default function App() {
   const notify = useCallback((text: string) => {
     setToast(text);
     window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(null), 1800);
+    toastTimer.current = window.setTimeout(() => setToast(null), Math.max(1800, text.length * 45));
   }, []);
+  notifyRef.current = notify;
 
   /** Copy the selected strokes, or the whole drawing when nothing is selected. */
   const copyStrokes = useCallback((layerId: string, f: number, indices: number[] | null) => {
@@ -416,6 +446,15 @@ export default function App() {
         });
         return;
       }
+      if (key === 'r' && e.shiftKey) { setAids((a) => ({ ...a, rulers: !a.rulers })); return; }
+      if (key === 'y') {
+        setAids((a) => {
+          const next = SYMMETRY[(SYMMETRY.findIndex((m) => m.id === a.symmetry) + 1) % SYMMETRY.length];
+          notify(`Symmetry: ${next.name.toLowerCase()}`);
+          return { ...a, symmetry: next.id };
+        });
+        return;
+      }
       if (key === ' ') {
         e.preventDefault();
         if (!e.repeat) { spacePanned.current = false; setSpaceHeld(true); }
@@ -452,7 +491,7 @@ export default function App() {
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
     };
-  }, [exporting, frame, length, tool, togglePlay, goTo, newDrawing, duplicate, selection, deleteSelection, copyStrokes, pasteStrokes, activeLayerId, activeLayer, apply, project]);
+  }, [exporting, frame, length, tool, togglePlay, goTo, newDrawing, duplicate, selection, deleteSelection, copyStrokes, pasteStrokes, activeLayerId, activeLayer, apply, project, notify]);
 
   const newProject = () => {
     setMenuOpen(false);
@@ -564,6 +603,7 @@ export default function App() {
             <div className="menu-list" onMouseLeave={() => setMenuOpen(false)}>
               <button onClick={newProject} title="Start a blank animation, replacing the current one">New animation</button>
               <button onClick={() => { setMenuOpen(false); audioInput.current?.click(); }} title="Add a sound (MP3, WAV…) to time the animation to, for example dialogue for lip-sync. It's saved inside the animation.">{project.audio ? 'Replace sound…' : 'Add sound…'}</button>
+              <button onClick={() => { setMenuOpen(false); imageInput.current?.click(); }} title="Add a picture to trace over, as a see-through layer. It shows on every frame and is never exported.">Add reference image…</button>
               <button onClick={openProject} title={canSaveToFile() ? 'Open an animation file. Changes then save back to it automatically.' : 'Open an animation saved with Save to file'}>Open from file…</button>
               {canSaveToFile() ? (
                 <>
@@ -578,6 +618,10 @@ export default function App() {
           <input
             ref={audioInput} type="file" accept="audio/*" hidden
             onChange={(e) => { const f = e.target.files?.[0]; if (f) addAudio(f); e.target.value = ''; }}
+          />
+          <input
+            ref={imageInput} type="file" accept="image/*" hidden
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) addReference(f); e.target.value = ''; }}
           />
           <input
             ref={fileInput} type="file" accept=".json,application/json" hidden
@@ -632,10 +676,18 @@ export default function App() {
         {(tool === 'rect' || tool === 'ellipse') && (
           <label title="Fill the shape with colour instead of drawing its outline"><input type="checkbox" checked={brush.fillShapes} onChange={(e) => setBrush((b) => ({ ...b, fillShapes: e.target.checked }))} /> Filled</label>
         )}
+        {(tool === 'brush' || tool === 'eraser' || tool === 'line' || tool === 'rect' || tool === 'ellipse') && (
+          <label title="Mirror what you draw across the middle of the canvas (Y to switch)">Symmetry
+            <select value={aids.symmetry} onChange={(e) => setAids((a) => ({ ...a, symmetry: e.target.value as Symmetry }))}>
+              {SYMMETRY.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          </label>
+        )}
         {(tool === 'line' || tool === 'rect' || tool === 'ellipse') && <span className="hint">Hold Shift for {tool === 'line' ? '45° angles' : tool === 'rect' ? 'a square' : 'a circle'}</span>}
         {tool === 'fill' && <span className="hint">Click inside a closed area of the selected layer. The fill goes under your lines.</span>}
         {tool === 'eyedropper' && <span className="hint">Click the canvas to pick its colour. Alt+click does the same with any drawing tool.</span>}
-        {tool === 'select' && !selection && <span className="hint">Draw a loop around strokes, or click one, to select them</span>}
+        {tool === 'select' && activeLayer?.reference && <span className="hint">Reference image: drag it to move it, drag a corner to resize it (Shift lets the proportions change)</span>}
+        {tool === 'select' && !selection && !activeLayer?.reference && <span className="hint">Draw a loop around strokes, or click one, to select them</span>}
         {tool === 'select' && selection && (
           <>
             <span className="hint">{selection.length} selected · drag to move · drag a corner to resize (Shift keeps proportions)</span>
@@ -720,6 +772,7 @@ export default function App() {
           project={project} frame={frame} activeLayerId={activeLayerId} tool={tool} brush={brush} onion={onion$}
           selection={selection} onSelectionChange={setSelection} onCommit={onCommit}
           panKey={spaceHeld} onPanned={() => { spacePanned.current = true; }} playing={playing}
+          symmetry={aids.symmetry} rulers={aids.rulers} onRulersChange={(rulers) => setAids((a) => ({ ...a, rulers }))}
           onPickColor={(color) => {
             setBrush((b) => ({ ...b, color }));
             if (tool === 'eyedropper') setTool('brush');
@@ -753,6 +806,7 @@ export default function App() {
           onRemoveGroup={(id) => { apply((p) => removeGroup(p, id)); setSelectedGroupId(null); }}
           onUpdate={(id, patch, record = true) => apply((p) => P.updateLayer(p, id, patch), record)}
           onOnionChange={setOnion}
+          onAddReference={() => imageInput.current?.click()}
         /></div>}
       </div>
 

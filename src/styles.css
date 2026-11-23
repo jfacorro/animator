@@ -343,3 +343,23 @@ button.file-status.paused {
 .splitter-btn:hover { color: var(--text); border-color: var(--accent); }
 .splitter.vertical .splitter-btn { width: 14px; height: 36px; top: 50%; left: 50%; transform: translate(-50%, -50%); }
 .splitter.horizontal .splitter-btn { width: 36px; height: 14px; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+
+/* Rulers and guides */
+.stage-ruler { position: absolute; background: var(--panel-2); color: var(--muted); z-index: 3; overflow: hidden; touch-action: none; }
+.stage-ruler.top { top: 0; left: 0; right: 0; height: 20px; border-bottom: 1px solid var(--border); cursor: row-resize; }
+.stage-ruler.left { top: 0; left: 0; bottom: 0; width: 20px; border-right: 1px solid var(--border); cursor: col-resize; }
+.stage-ruler.off { opacity: 0.6; }
+.stage-ruler svg { display: block; }
+.stage-ruler line { stroke: currentColor; stroke-width: 1; opacity: 0.6; }
+.stage-ruler text { fill: currentColor; font-size: 9px; font-variant-numeric: tabular-nums; }
+.ruler-corner {
+  position: absolute; top: 0; left: 0; width: 20px; height: 20px; z-index: 4; background: var(--panel-2);
+  border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); color: var(--muted);
+  display: flex; align-items: center; justify-content: center; font-size: 12px; cursor: pointer;
+}
+.ruler-corner:hover { color: var(--text); }
+.guide-marker { position: absolute; background: #22b8cf; cursor: grab; }
+.guide-marker.x { top: 6px; width: 3px; height: 14px; margin-left: -1px; cursor: ew-resize; }
+.guide-marker.y { left: 6px; height: 3px; width: 14px; margin-top: -1px; cursor: ns-resize; }
+.stage.with-rulers .stage-note { top: 32px; }
+.head-btns { display: flex; gap: 2px; }

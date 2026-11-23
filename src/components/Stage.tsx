@@ -5,7 +5,9 @@ import { floodFillSpans } from '../render/fill';
 import { catchUp, stabilize } from '../model/brushes';
 import { groupOf } from '../model/groups';
 import { cameraAt, cameraCorners, hasCamera, setCameraKey, type CameraView } from '../model/camera';
-import { composeFrame, paintStroke, type OnionOptions } from '../render/render';
+import { composeFrame, onImageLoad, paintStroke, type OnionOptions } from '../render/render';
+import { placeReference, rulerStep, snapToGuides, symmetricStrokes, type GuideAxis, type Symmetry } from '../model/aids';
+import { addGuide, moveGuide, removeGuide } from '../model/aids';
 import { FIT_VIEW, flipAt, pinch, rotateAt, screenToLocal, snapRotation, viewTransform, zoomAt, type View } from '../model/view';
 import * as I from './Icons';
 
@@ -48,7 +50,14 @@ interface Props {
   onPanned: () => void;
   /** During playback the scene is framed through the camera. */
   playing: boolean;
+  /** Mirror strokes and shapes across the canvas centre. */
+  symmetry: Symmetry;
+  /** Show rulers along the stage edges; guides are dragged out of them. */
+  rulers: boolean;
+  onRulersChange: (on: boolean) => void;
 }
+
+const RULER = 20; // ruler thickness, screen px
 
 /** Navigation gestures: pan with one pointer, or pinch (zoom/rotate/pan) with two fingers. */
 type Nav =
@@ -63,10 +72,21 @@ type Gesture =
   | { type: 'scale'; pointerId: number; origin: Vec; corner: Vec; matrix: Matrix }
   | { type: 'camera'; pointerId: number; mode: 'move' | 'zoom'; start: Vec; base: CameraView; view: CameraView };
 
+/** A guide being dragged out of a ruler (index null) or moved (index set). */
+interface GuideDrag { pointerId: number; axis: GuideAxis; index: number | null; pos: number; onRuler: boolean }
+
 const SHAPES: Tool[] = ['line', 'rect', 'ellipse'];
+const MIRRORED: Tool[] = ['brush', 'eraser', 'line', 'rect', 'ellipse'];
+
+/** A rectangle after a move/scale matrix. */
+function movedRect(r: { x: number; y: number; width: number; height: number }, m: Matrix) {
+  const a = apply(m, r.x, r.y);
+  const b = apply(m, r.x + r.width, r.y + r.height);
+  return { x: Math.min(a[0], b[0]), y: Math.min(a[1], b[1]), width: Math.abs(b[0] - a[0]), height: Math.abs(b[1] - a[1]) };
+}
 const EDITS: Tool[] = ['brush', 'eraser', 'line', 'rect', 'ellipse', 'fill', 'select'];
 
-export function Stage({ project, frame, activeLayerId, tool, brush, onion, selection, onSelectionChange, onCommit, onPickColor, panKey, onPanned, playing }: Props) {
+export function Stage({ project, frame, activeLayerId, tool, brush, onion, selection, onSelectionChange, onCommit, onPickColor, panKey, onPanned, playing, symmetry, rulers, onRulersChange }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gestureRef = useRef<Gesture | null>(null);
@@ -80,10 +100,15 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [, setOverlayTick] = useState(0);
+  const [stageSize, setStageSize] = useState({ w: 800, h: 600 });
+  const [guideDrag, setGuideDrag] = useState<GuideDrag | null>(null);
+  const [imageTick, setImageTick] = useState(0);
 
   const layer = project.layers.find((l) => l.id === activeLayerId);
   const group = layer ? groupOf(project, layer) : null;
+  const isRef = !!layer?.reference;
   const blocked = !layer ? 'Pick a layer to draw on'
+    : isRef && tool !== 'select' ? 'This is a reference image: pick another layer to draw on. Use the Lasso tool to move or resize it.'
     : layer.locked ? 'This layer is locked' : group?.locked ? 'This layer\'s group is locked'
     : !layer.visible ? 'This layer is hidden' : group && !group.visible ? 'This layer\'s group is hidden' : null;
   const drawing = layer ? drawingAt(project, layer, frame) : null;
@@ -106,6 +131,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       const ah = Math.max(100, el.clientHeight - pad);
       const s = Math.min(aw / project.width, ah / project.height);
       setDisplay({ w: Math.floor(project.width * s), h: Math.floor(project.height * s) });
+      setStageSize({ w: el.clientWidth, h: el.clientHeight });
     };
     fit();
     const ro = new ResizeObserver(fit);
@@ -118,10 +144,19 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     if (!ctx) return;
     const g = gestureRef.current;
     let shown = project;
-    if (g && (g.type === 'move' || g.type === 'scale') && selection) shown = transformStrokes(project, activeLayerId, frame, selection, g.matrix);
-    const live = g && (g.type === 'stroke' || g.type === 'shape') ? { layerId: activeLayerId, stroke: g.stroke } : null;
-    composeFrame(ctx, shown, frame, { paper: true, onion, live, camera: playing });
-  }, [project, frame, onion, activeLayerId, selection, playing]);
+    if (g && (g.type === 'move' || g.type === 'scale')) {
+      const ref = project.layers.find((l) => l.id === activeLayerId)?.reference;
+      if (ref) shown = placeReference(project, activeLayerId, movedRect(ref, g.matrix));
+      else if (selection) shown = transformStrokes(project, activeLayerId, frame, selection, g.matrix);
+    }
+    const live = g && (g.type === 'stroke' || g.type === 'shape')
+      ? { layerId: activeLayerId, strokes: symmetricStrokes(g.stroke, symmetry, project.width, project.height) } : null;
+    composeFrame(ctx, shown, frame, { paper: true, onion, live, camera: playing, references: !playing });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project, frame, onion, activeLayerId, selection, playing, symmetry, imageTick]);
+
+  // Repaint when a reference image finishes loading.
+  useEffect(() => onImageLoad(() => setImageTick((t) => t + 1)), []);
 
   useEffect(() => {
     paint();
@@ -272,6 +307,12 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
 
   // The selection's box, following any move or scale in progress.
   const selectionBox = (): Box | null => {
+    const ref = layer?.reference;
+    const g0 = gestureRef.current;
+    if (ref) {
+      const r = g0 && (g0.type === 'move' || g0.type === 'scale') ? movedRect(ref, g0.matrix) : ref;
+      return { x0: r.x, y0: r.y, x1: r.x + r.width, y1: r.y + r.height };
+    }
     if (!selection || !drawing) return null;
     const box = unionBoxes(selection.map((i) => (drawing.strokes[i] ? strokeBounds(drawing.strokes[i]) : null)));
     const g = gestureRef.current;
@@ -286,7 +327,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     c.width = project.width;
     c.height = project.height;
     const ctx = c.getContext('2d', { willReadFrequently: true })!;
-    composeFrame(ctx, project, frame, { paper: true });
+    composeFrame(ctx, project, frame, { paper: true, references: true });
     const [r, g, b] = ctx.getImageData(Math.floor(x), Math.floor(y), 1, 1).data;
     onPickColor(`#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`);
   };
@@ -310,6 +351,13 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     };
     onCommit((p) => addStroke(p, activeLayerId, frame, stroke, true));
   };
+
+  /** Pull a point onto a nearby guide (within 8 screen px). */
+  const snap = (pt: Vec): Vec => snapToGuides(pt, project.guides, 8 / vs);
+
+  /** A stroke and its symmetry copies, as one edit. */
+  const addStrokes = (p: Project, stroke: Stroke) =>
+    symmetricStrokes(stroke, symmetry, p.width, p.height).reduce((q, s) => addStroke(q, activeLayerId, frame, s), p);
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
@@ -360,6 +408,10 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
           return;
         }
       }
+      if (isRef) {
+        flash('Drag the picture to move it, or a corner to resize it');
+        return;
+      }
       onSelectionChange(null);
       gestureRef.current = { type: 'lasso', pointerId: id, points: [[x, y]] };
       schedulePaint();
@@ -368,10 +420,12 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
 
     const erase = tool === 'eraser';
     if (SHAPES.includes(tool)) {
+      const [sx, sy] = snap([x, y]);
+      const sp: Point = [sx, sy, 0.5];
       gestureRef.current = {
-        type: 'shape', pointerId: id, start: [x, y],
+        type: 'shape', pointerId: id, start: [sx, sy],
         stroke: {
-          kind: tool as Stroke['kind'], points: [pt, pt], color: brush.color, size: brush.size, erase: false,
+          kind: tool as Stroke['kind'], points: [sp, sp], color: brush.color, size: brush.size, erase: false,
           smoothing: 0, simulatePressure: false, thinning: 0, filled: tool !== 'line' && brush.fillShapes,
           ...(brush.opacity < 1 ? { opacity: brush.opacity } : {}),
         },
@@ -434,6 +488,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
           ey = sy + Math.sign(dy || 1) * side;
         }
       }
+      if (!e.shiftKey) [ex, ey] = snap([ex, ey]);
       g.stroke = { ...g.stroke, points: [g.stroke.points[0], [ex, ey, 0.5]] };
     } else if (g.type === 'camera') {
       const b = g.base;
@@ -454,7 +509,8 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       const [cx, cy] = g.corner;
       let sx = (x - ox) / (cx - ox || 1);
       let sy = (y - oy) / (cy - oy || 1);
-      if (e.shiftKey) sx = sy = Math.max(sx, sy);
+      // Pictures keep their proportions unless Shift is held; strokes the other way round.
+      if (e.shiftKey !== !!layer?.reference) sx = sy = Math.max(sx, sy);
       sx = Math.max(0.05, sx);
       sy = Math.max(0.05, sy);
       g.matrix = scaleAbout(sx, sy, ox, oy);
@@ -471,10 +527,10 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     if (g.type === 'stroke') {
       const tail = catchUp(g.tip, g.pointer);
       const stroke = tail.length ? { ...g.stroke, points: [...g.stroke.points, ...tail] } : g.stroke;
-      onCommit((p) => addStroke(p, activeLayerId, frame, stroke));
+      onCommit((p) => addStrokes(p, stroke));
     } else if (g.type === 'shape') {
       const [a, b] = g.stroke.points;
-      if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 1) onCommit((p) => addStroke(p, activeLayerId, frame, g.stroke));
+      if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 1) onCommit((p) => addStrokes(p, g.stroke));
       else paint();
     } else if (g.type === 'camera') {
       const v = g.view;
@@ -494,18 +550,74 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       }
       onSelectionChange(hits.length ? hits : null);
       setOverlayTick((t) => t + 1);
-    } else if (selection) {
+    } else if (layer?.reference || selection) {
       const m = g.matrix;
+      const ref = layer?.reference;
       if (m[0] !== 1 || m[3] !== 1 || m[4] !== 0 || m[5] !== 0) {
-        onCommit((p) => transformStrokes(p, activeLayerId, frame, selection, m));
+        if (ref) onCommit((p) => placeReference(p, activeLayerId, movedRect(ref, m)));
+        else if (selection) onCommit((p) => transformStrokes(p, activeLayerId, frame, selection, m));
       } else {
         paint();
       }
     }
   };
 
+  // Guides: drag one out of a ruler, drag its marker to move it, drop it back on the ruler to remove it.
+  const guideAt = (e: React.PointerEvent, axis: GuideAxis): GuideDrag['pos'] => {
+    const [lx, ly] = toLocal(e);
+    return Math.round((axis === 'x' ? lx : ly) / scale);
+  };
+  const overRuler = (e: React.PointerEvent, axis: GuideAxis) => {
+    const r = wrapRef.current!.getBoundingClientRect();
+    return axis === 'x' ? e.clientX - r.left < RULER : e.clientY - r.top < RULER;
+  };
+  const startGuide = (e: React.PointerEvent, axis: GuideAxis, index: number | null) => {
+    if (e.button !== 0 || panKey) return;
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setGuideDrag({ pointerId: e.pointerId, axis, index, pos: index === null ? guideAt(e, axis) : project.guides![axis][index], onRuler: true });
+  };
+  const moveGuideDrag = (e: React.PointerEvent) => {
+    const d = guideDrag;
+    if (!d || d.pointerId !== e.pointerId) return;
+    setGuideDrag({ ...d, pos: guideAt(e, d.axis), onRuler: overRuler(e, d.axis) });
+  };
+  const endGuideDrag = (e: React.PointerEvent) => {
+    const d = guideDrag;
+    if (!d || d.pointerId !== e.pointerId) return;
+    setGuideDrag(null);
+    const pos = guideAt(e, d.axis);
+    if (overRuler(e, d.axis)) {
+      if (d.index !== null) onCommit((p) => removeGuide(p, d.axis, d.index!));
+    } else if (d.index === null) {
+      onCommit((p) => addGuide(p, d.axis, pos));
+    } else if (pos !== project.guides?.[d.axis][d.index]) {
+      onCommit((p) => moveGuide(p, d.axis, d.index!, pos));
+    }
+  };
+  const guideHandlers = { onPointerMove: moveGuideDrag, onPointerUp: endGuideDrag, onPointerCancel: () => setGuideDrag(null) };
+
   const g = gestureRef.current;
   const box = tool === 'select' ? selectionBox() : null;
+  const guides = project.guides;
+  const axes = symmetry !== 'off' && MIRRORED.includes(tool) && !playing;
+  const straight = view.rotation === 0;
+  // Ruler mapping (only while the view isn't rotated): project px → stage px.
+  const sgn = view.flip ? -1 : 1;
+  const toSX = (x: number) => stageSize.w / 2 + view.x + sgn * (x * scale - display.w / 2) * view.zoom;
+  const toSY = (y: number) => stageSize.h / 2 + view.y + (y * scale - display.h / 2) * view.zoom;
+  const ticks = (len: number, to: (v: number) => number) => {
+    const step = rulerStep(vs);
+    const minor = step / (String(step)[0] === '2' ? 4 : 5);
+    const a = (0 - to(0)) / (to(1) - to(0));
+    const b = (len - to(0)) / (to(1) - to(0));
+    const out: { v: number; at: number; major: boolean }[] = [];
+    for (let k = Math.ceil(Math.min(a, b) / minor); k <= Math.floor(Math.max(a, b) / minor); k++) {
+      const v = Math.round(k * minor * 1000) / 1000;
+      out.push({ v, at: to(v), major: Math.abs(v / step - Math.round(v / step)) < 1e-6 });
+    }
+    return out;
+  };
   // The camera's frame: shown while the camera tool is on, or faintly whenever the camera moves.
   const camView = g?.type === 'camera' ? g.view : !playing && (tool === 'camera' || hasCamera(project)) ? cameraAt(project, frame) : null;
   const camCorners = camView ? cameraCorners(camView, project.width, project.height) : null;
@@ -517,7 +629,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
 
   return (
     <div
-      className={`stage${panKey ? ' pan' : ''}${navigating ? ' grabbing' : ''}`}
+      className={`stage${rulers && !playing ? ' with-rulers' : ''}${panKey ? ' pan' : ''}${navigating ? ' grabbing' : ''}`}
       ref={wrapRef}
       onPointerDownCapture={onNavDown}
       onPointerMove={onNavMove}
@@ -538,8 +650,23 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
           onPointerCancel={finish}
           onPointerLeave={() => setCursor(null)}
         />
-        {(box || camCorners || g?.type === 'lasso' || (g?.type === 'stroke' && brush.stabilizer > 0 && !g.stroke.erase)) && (
+        {(box || camCorners || guides || guideDrag || axes || g?.type === 'lasso' || (g?.type === 'stroke' && brush.stabilizer > 0 && !g.stroke.erase)) && (
           <svg className="overlay" viewBox={`0 0 ${project.width} ${project.height}`} aria-hidden="true">
+            {axes && (
+              <g className="symmetry-axes" stroke="#c45bd6" strokeWidth={1.2 / vs} strokeDasharray={`${10 / vs} ${6 / vs}`}>
+                {symmetry !== 'y' && <line x1={project.width / 2} y1={0} x2={project.width / 2} y2={project.height} />}
+                {symmetry !== 'x' && <line x1={0} y1={project.height / 2} x2={project.width} y2={project.height / 2} />}
+              </g>
+            )}
+            {!playing && (guides || guideDrag) && (
+              <g className="guides" stroke="#22b8cf" strokeWidth={1 / vs}>
+                {guides?.x.map((x, i) => !(guideDrag?.axis === 'x' && guideDrag.index === i) && <line key={`x${i}`} x1={x} y1={-1e5} x2={x} y2={1e5} />)}
+                {guides?.y.map((y, i) => !(guideDrag?.axis === 'y' && guideDrag.index === i) && <line key={`y${i}`} x1={-1e5} y1={y} x2={1e5} y2={y} />)}
+                {guideDrag && !guideDrag.onRuler && (guideDrag.axis === 'x'
+                  ? <line x1={guideDrag.pos} y1={-1e5} x2={guideDrag.pos} y2={1e5} strokeDasharray={`${4 / vs} ${3 / vs}`} />
+                  : <line x1={-1e5} y1={guideDrag.pos} x2={1e5} y2={guideDrag.pos} strokeDasharray={`${4 / vs} ${3 / vs}`} />)}
+              </g>
+            )}
             {camCorners && (
               <g className={`camera-frame${camActive ? ' active' : ''}`}>
                 <polygon
@@ -581,6 +708,55 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
           />
         )}
       </div>
+      {rulers && !playing && (
+        <>
+          <div
+            className={`stage-ruler top${straight ? '' : ' off'}`} {...guideHandlers}
+            title={straight ? 'Drag down onto the canvas to add a guide. Drag a guide back here to remove it.' : 'Straighten the view (5) to read the rulers. You can still drag guides out.'}
+            onPointerDown={(e) => startGuide(e, 'y', null)}
+          >
+            {straight && (
+              <svg width={stageSize.w} height={RULER} aria-hidden="true">
+                {ticks(stageSize.w, toSX).map((t) => (
+                  <g key={t.v}>
+                    <line x1={t.at} x2={t.at} y1={t.major ? 4 : 14} y2={RULER} />
+                    {t.major && <text x={t.at + 3} y={11}>{t.v}</text>}
+                  </g>
+                ))}
+              </svg>
+            )}
+            {straight && guides?.x.map((x, i) => (
+              <span
+                key={i} className="guide-marker x" style={{ left: toSX(x) }} title={`Guide at x ${x}. Drag to move it, drag it back onto the ruler or double-click to remove it.`}
+                onPointerDown={(e) => startGuide(e, 'x', i)} onDoubleClick={() => onCommit((p) => removeGuide(p, 'x', i))}
+              />
+            ))}
+          </div>
+          <div
+            className={`stage-ruler left${straight ? '' : ' off'}`} {...guideHandlers}
+            title={straight ? 'Drag right onto the canvas to add a guide. Drag a guide back here to remove it.' : 'Straighten the view (5) to read the rulers. You can still drag guides out.'}
+            onPointerDown={(e) => startGuide(e, 'x', null)}
+          >
+            {straight && (
+              <svg width={RULER} height={stageSize.h} aria-hidden="true">
+                {ticks(stageSize.h, toSY).map((t) => (
+                  <g key={t.v}>
+                    <line y1={t.at} y2={t.at} x1={t.major ? 4 : 14} x2={RULER} />
+                    {t.major && <text transform={`translate(11 ${t.at + 3}) rotate(-90)`}>{t.v}</text>}
+                  </g>
+                ))}
+              </svg>
+            )}
+            {straight && guides?.y.map((y, i) => (
+              <span
+                key={i} className="guide-marker y" style={{ top: toSY(y) }} title={`Guide at y ${y}. Drag to move it, drag it back onto the ruler or double-click to remove it.`}
+                onPointerDown={(e) => startGuide(e, 'y', i)} onDoubleClick={() => onCommit((p) => removeGuide(p, 'y', i))}
+              />
+            ))}
+          </div>
+          <div className="ruler-corner" title="Hide the rulers (Shift+R)" onClick={() => onRulersChange(false)}>×</div>
+        </>
+      )}
       {note && <div className="stage-note" role="status">{note}</div>}
       <div className="view-controls" role="group" aria-label="View">
         <button className="icon-btn" aria-label="Zoom out" title="Zoom out (−, or scroll the mouse wheel)" onClick={() => setView((v) => zoomAt(v, 0.8))}><I.Minus /></button>
@@ -593,6 +769,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
         )}
         <button className="icon-btn" aria-label="Rotate right" title="Rotate the view 15° right (6)" onClick={() => setView((v) => rotateAt(v, 15))}><I.RotateRight /></button>
         <button className={`icon-btn${view.flip ? ' on' : ''}`} aria-label="Mirror view" aria-pressed={view.flip} title="Mirror the view left to right to check your drawing with fresh eyes (M). The drawing itself doesn't change." onClick={() => setView((v) => flipAt(v))}><I.Mirror /></button>
+        <button className={`icon-btn${rulers ? ' on' : ''}`} aria-label="Rulers and guides" aria-pressed={rulers} title="Show rulers to drag guides out of (Shift+R). Shapes snap to guides." onClick={() => onRulersChange(!rulers)}><I.Ruler /></button>
         <span className="sep" />
         <button className="btn small" title="Fit the whole canvas on screen and straighten it (0). Pan with Space+drag, the middle mouse button or two fingers." onClick={() => setView(FIT_VIEW)}>Fit</button>
       </div>

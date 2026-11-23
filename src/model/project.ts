@@ -1,5 +1,6 @@
 // The project data model and pure operations on it.
 import { multiply, type Matrix } from './geometry';
+import type { Guides, RefImage } from './aids';
 //
 // A project is a stack of layers. Each layer holds an ordered list of cels
 // (an "exposure sheet"): every cel shows one drawing for `hold` frames, so a
@@ -59,6 +60,8 @@ export interface Layer {
   clip?: boolean;
   /** The group this layer belongs to. A group's layers sit next to each other. */
   groupId?: string;
+  /** A reference image to trace over: shown on every frame, never drawn on or exported. */
+  reference?: RefImage;
 }
 
 export type BlendMode =
@@ -115,6 +118,8 @@ export interface Project {
   camera?: CameraKey[];
   audio?: AudioTrack | null;
   groups?: Record<string, LayerGroup>;
+  /** Guide lines to line drawings up with. */
+  guides?: Guides;
 }
 
 export const MAX_HOLD = 24;
@@ -418,7 +423,8 @@ export function addLayer(project: Project, name: string, aboveLayerId?: string):
 }
 
 export function removeLayer(project: Project, layerId: string): Project {
-  if (project.layers.length <= 1) return project;
+  // Keep at least one layer to draw on.
+  if (!project.layers.some((l) => l.id !== layerId && !l.reference)) return project;
   return pruneGroups(pruneDrawings({ ...project, layers: project.layers.filter((l) => l.id !== layerId) }));
 }
 
