@@ -3,6 +3,8 @@ import { scaleAbout, strokeBounds, strokesInLasso, translate, unionBoxes, apply,
 import { addStroke, drawingAt, transformStrokes, type Point, type Project, type Stroke } from '../model/project';
 import { floodFillSpans } from '../render/fill';
 import { composeFrame, paintStroke, type OnionOptions } from '../render/render';
+import { FIT_VIEW, flipAt, pinch, rotateAt, screenToLocal, snapRotation, viewTransform, zoomAt, type View } from '../model/view';
+import * as I from './Icons';
 
 export type Tool = 'brush' | 'eraser' | 'line' | 'rect' | 'ellipse' | 'fill' | 'eyedropper' | 'select';
 
@@ -29,7 +31,16 @@ interface Props {
   /** Apply an edit to the project as one undo step. */
   onCommit: (edit: (p: Project) => Project) => void;
   onPickColor: (color: string) => void;
+  /** Space is held: dragging pans instead of drawing. */
+  panKey: boolean;
+  /** Called when a Space-drag pans, so letting go of Space doesn't toggle playback. */
+  onPanned: () => void;
 }
+
+/** Navigation gestures: pan with one pointer, or pinch (zoom/rotate/pan) with two fingers. */
+type Nav =
+  | { type: 'pan'; pointerId: number; last: Vec }
+  | { type: 'pinch'; ids: [number, number]; start: [Vec, Vec]; view: View };
 
 type Gesture =
   | { type: 'stroke'; pointerId: number; stroke: Stroke }
@@ -41,12 +52,17 @@ type Gesture =
 const SHAPES: Tool[] = ['line', 'rect', 'ellipse'];
 const EDITS: Tool[] = ['brush', 'eraser', 'line', 'rect', 'ellipse', 'fill', 'select'];
 
-export function Stage({ project, frame, activeLayerId, tool, brush, onion, selection, onSelectionChange, onCommit, onPickColor }: Props) {
+export function Stage({ project, frame, activeLayerId, tool, brush, onion, selection, onSelectionChange, onCommit, onPickColor, panKey, onPanned }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gestureRef = useRef<Gesture | null>(null);
   const rafRef = useRef(0);
+  const navRef = useRef<Nav | null>(null);
+  /** Touch points currently down on the stage, in screen offsets from the stage centre. */
+  const touchesRef = useRef(new Map<number, Vec>());
   const [display, setDisplay] = useState({ w: 640, h: 360 });
+  const [view, setView] = useState<View>(FIT_VIEW);
+  const [navigating, setNavigating] = useState(false);
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [, setOverlayTick] = useState(0);
@@ -55,6 +71,8 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   const blocked = !layer ? 'Pick a layer to draw on' : layer.locked ? 'This layer is locked' : !layer.visible ? 'This layer is hidden' : null;
   const drawing = layer ? drawingAt(project, layer, frame) : null;
   const scale = display.w / project.width;
+  /** Screen px per project px, including zoom. */
+  const vs = scale * view.zoom;
 
   const flash = (text: string) => {
     setNote(text);
@@ -94,6 +112,119 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
 
   useEffect(() => () => cancelAnimationFrame(rafRef.current), []);
 
+  // A new or opened animation starts fitted to the screen.
+  useEffect(() => { setView(FIT_VIEW); }, [project.id]);
+
+  // Wheel: zoom around the pointer. Sideways scrolling (trackpads) or Shift+wheel pans.
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const line = e.deltaMode === 1 ? 33 : 1;
+      if (!e.ctrlKey && !e.metaKey && (e.deltaX !== 0 || e.shiftKey)) {
+        const dx = (e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX) * line;
+        const dy = e.shiftKey ? 0 : e.deltaY * line;
+        setView((v) => ({ ...v, x: v.x - dx, y: v.y - dy }));
+        return;
+      }
+      const d = Math.max(-20, Math.min(20, e.deltaY * line));
+      const r = el.getBoundingClientRect();
+      const at: Vec = [e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2)];
+      setView((v) => zoomAt(v, Math.exp(-d * 0.01), at));
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  // View shortcuts.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement).closest('input, select, textarea, [role="dialog"]') || e.altKey) return;
+      const mod = e.ctrlKey || e.metaKey;
+      const k = e.key.toLowerCase();
+      let next: ((v: View) => View) | null = null;
+      if (k === '=' || k === '+') next = (v) => zoomAt(v, 1.25);
+      else if (k === '-' || k === '_') next = (v) => zoomAt(v, 0.8);
+      else if (k === '0') next = () => FIT_VIEW;
+      else if (k === '1') next = (v) => zoomAt(v, 1 / scale / v.zoom);
+      else if (mod) return;
+      else if (k === '4') next = (v) => rotateAt(v, -15);
+      else if (k === '6') next = (v) => rotateAt(v, 15);
+      else if (k === '5') next = (v) => rotateAt(v, -v.rotation);
+      else if (k === 'm') next = (v) => flipAt(v);
+      if (!next) return;
+      e.preventDefault();
+      setView(next);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [scale]);
+
+  /** Stop a drawing gesture without committing it (a second finger turned it into a pinch). */
+  const cancelGesture = () => {
+    if (!gestureRef.current) return;
+    gestureRef.current = null;
+    cancelAnimationFrame(rafRef.current);
+    paint();
+    setOverlayTick((t) => t + 1);
+  };
+
+  // Navigation runs on the whole stage, before the canvas sees the pointer.
+  const onNavDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest('.view-controls')) return;
+    const at = fromCentre(e);
+    if (e.pointerType === 'touch') {
+      const touches = touchesRef.current;
+      touches.set(e.pointerId, at);
+      if (touches.size < 2) return;
+      e.stopPropagation();
+      if (touches.size > 2 || navRef.current) return;
+      const g = gestureRef.current;
+      if (g && touches.has(g.pointerId)) cancelGesture();
+      const ids = [...touches.keys()] as [number, number];
+      navRef.current = { type: 'pinch', ids, start: [touches.get(ids[0])!, touches.get(ids[1])!], view };
+      e.currentTarget.setPointerCapture(e.pointerId);
+      setNavigating(true);
+      return;
+    }
+    if ((e.pointerType === 'mouse' && e.button === 1) || (panKey && e.button === 0)) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (gestureRef.current || navRef.current) return;
+      navRef.current = { type: 'pan', pointerId: e.pointerId, last: at };
+      e.currentTarget.setPointerCapture(e.pointerId);
+      setNavigating(true);
+      if (panKey) onPanned();
+    }
+  };
+
+  const onNavMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const at = fromCentre(e);
+    const touches = touchesRef.current;
+    if (touches.has(e.pointerId)) touches.set(e.pointerId, at);
+    const n = navRef.current;
+    if (n?.type === 'pan' && n.pointerId === e.pointerId) {
+      const [dx, dy] = [at[0] - n.last[0], at[1] - n.last[1]];
+      n.last = at;
+      setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
+    } else if (n?.type === 'pinch' && n.ids.includes(e.pointerId)) {
+      const a = touches.get(n.ids[0]);
+      const b = touches.get(n.ids[1]);
+      if (a && b) setView(pinch(n.view, n.start[0], n.start[1], a, b));
+    }
+  };
+
+  const onNavUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    touchesRef.current.delete(e.pointerId);
+    const n = navRef.current;
+    if ((n?.type === 'pan' && n.pointerId === e.pointerId) || (n?.type === 'pinch' && n.ids.includes(e.pointerId))) {
+      navRef.current = null;
+      setNavigating(false);
+      if (n.type === 'pinch') setView((v) => snapRotation(v));
+    }
+  };
+
   const schedulePaint = () => {
     cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(() => {
@@ -102,10 +233,22 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     });
   };
 
+  /** Screen offset of a pointer from the stage centre (where the unpanned canvas centre sits). */
+  const fromCentre = (e: { clientX: number; clientY: number }): Vec => {
+    const r = wrapRef.current!.getBoundingClientRect();
+    return [e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2)];
+  };
+
+  /** Pointer position on the laid-out (fit-size) canvas, in px from its top-left corner. */
+  const toLocal = (e: { clientX: number; clientY: number }): Vec => {
+    const [x, y] = screenToLocal(view, fromCentre(e));
+    return [x + display.w / 2, y + display.h / 2];
+  };
+
   const toPoint = (e: PointerEvent | React.PointerEvent, usePen: boolean): Point => {
-    const rect = canvasRef.current!.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * project.width;
-    const y = ((e.clientY - rect.top) / rect.height) * project.height;
+    const [lx, ly] = toLocal(e);
+    const x = lx / scale;
+    const y = ly / scale;
     const p = usePen ? (e.pressure || 0.5) : 0.5;
     return [Math.round(x * 10) / 10, Math.round(y * 10) / 10, Math.round(p * 1000) / 1000];
   };
@@ -176,7 +319,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     if (tool === 'select') {
       const box = selectionBox();
       if (box) {
-        const r = 12 / scale;
+        const r = 12 / vs;
         const corners: Vec[] = [[box.x0, box.y0], [box.x1, box.y0], [box.x1, box.y1], [box.x0, box.y1]];
         const hit = corners.findIndex(([cx, cy]) => Math.abs(cx - x) <= r && Math.abs(cy - y) <= r);
         if (hit >= 0) {
@@ -225,8 +368,8 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    setCursor({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    const [cx, cy] = toLocal(e);
+    setCursor({ x: cx, y: cy });
     const g = gestureRef.current;
     if (!g || g.pointerId !== e.pointerId) return;
     const [x, y] = toPoint(e, false);
@@ -309,14 +452,21 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
 
   const g = gestureRef.current;
   const box = tool === 'select' ? selectionBox() : null;
-  const showBrushCursor = (tool === 'brush' || tool === 'eraser') && cursor && !blocked;
+  const showBrushCursor = (tool === 'brush' || tool === 'eraser') && cursor && !blocked && !panKey && !navigating;
   const cursorSize = (tool === 'eraser' ? brush.eraserSize : brush.size) * scale;
   const canvasClass = tool === 'eyedropper' ? 'pick' : blocked && EDITS.includes(tool) ? 'blocked' : tool === 'fill' ? 'fill' : tool === 'select' ? 'select' : 'draw';
-  const hs = 10 / scale; // handle size in project px
+  const hs = 10 / vs; // handle size in project px
 
   return (
-    <div className="stage" ref={wrapRef}>
-      <div className="canvas-wrap" style={{ width: display.w, height: display.h }}>
+    <div
+      className={`stage${panKey ? ' pan' : ''}${navigating ? ' grabbing' : ''}`}
+      ref={wrapRef}
+      onPointerDownCapture={onNavDown}
+      onPointerMove={onNavMove}
+      onPointerUp={onNavUp}
+      onPointerCancel={onNavUp}
+    >
+      <div className="canvas-wrap" style={{ width: display.w, height: display.h, transform: viewTransform(view) }}>
         <canvas
           ref={canvasRef}
           width={project.width}
@@ -333,13 +483,13 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
         {(box || g?.type === 'lasso') && (
           <svg className="overlay" viewBox={`0 0 ${project.width} ${project.height}`} aria-hidden="true">
             {g?.type === 'lasso' && (
-              <polyline points={g.points.map((p) => p.join(',')).join(' ')} fill="rgba(240,164,58,0.08)" stroke="#f0a43a" strokeWidth={1.5 / scale} strokeDasharray={`${5 / scale} ${4 / scale}`} />
+              <polyline points={g.points.map((p) => p.join(',')).join(' ')} fill="rgba(240,164,58,0.08)" stroke="#f0a43a" strokeWidth={1.5 / vs} strokeDasharray={`${5 / vs} ${4 / vs}`} />
             )}
             {box && (
               <g>
-                <rect x={box.x0} y={box.y0} width={box.x1 - box.x0} height={box.y1 - box.y0} fill="none" stroke="#f0a43a" strokeWidth={1.5 / scale} strokeDasharray={`${6 / scale} ${4 / scale}`} />
+                <rect x={box.x0} y={box.y0} width={box.x1 - box.x0} height={box.y1 - box.y0} fill="none" stroke="#f0a43a" strokeWidth={1.5 / vs} strokeDasharray={`${6 / vs} ${4 / vs}`} />
                 {[[box.x0, box.y0], [box.x1, box.y0], [box.x1, box.y1], [box.x0, box.y1]].map(([cx, cy], i) => (
-                  <rect key={i} x={cx - hs / 2} y={cy - hs / 2} width={hs} height={hs} fill="#fff" stroke="#f0a43a" strokeWidth={1.5 / scale} />
+                  <rect key={i} x={cx - hs / 2} y={cy - hs / 2} width={hs} height={hs} fill="#fff" stroke="#f0a43a" strokeWidth={1.5 / vs} />
                 ))}
               </g>
             )}
@@ -353,6 +503,20 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
         )}
       </div>
       {note && <div className="stage-note" role="status">{note}</div>}
+      <div className="view-controls" role="group" aria-label="View">
+        <button className="icon-btn" aria-label="Zoom out" title="Zoom out (−, or scroll the mouse wheel)" onClick={() => setView((v) => zoomAt(v, 0.8))}><I.Minus /></button>
+        <button className="zoom-value" title="Zoom level. Click for actual size, 1 pixel per pixel (1)" onClick={() => setView((v) => zoomAt(v, 1 / scale / v.zoom))}>{Math.round(vs * 100)}%</button>
+        <button className="icon-btn" aria-label="Zoom in" title="Zoom in (+, or scroll the mouse wheel)" onClick={() => setView((v) => zoomAt(v, 1.25))}><I.Plus /></button>
+        <span className="sep" />
+        <button className="icon-btn" aria-label="Rotate left" title="Rotate the view 15° left (4). On a touch screen, twist two fingers." onClick={() => setView((v) => rotateAt(v, -15))}><I.RotateLeft /></button>
+        {view.rotation !== 0 && (
+          <button className="zoom-value" title="Rotation of the view. Click to straighten it (5)" onClick={() => setView((v) => rotateAt(v, -v.rotation))}>{Math.round(view.rotation)}°</button>
+        )}
+        <button className="icon-btn" aria-label="Rotate right" title="Rotate the view 15° right (6)" onClick={() => setView((v) => rotateAt(v, 15))}><I.RotateRight /></button>
+        <button className={`icon-btn${view.flip ? ' on' : ''}`} aria-label="Mirror view" aria-pressed={view.flip} title="Mirror the view left to right to check your drawing with fresh eyes (M). The drawing itself doesn't change." onClick={() => setView((v) => flipAt(v))}><I.Mirror /></button>
+        <span className="sep" />
+        <button className="btn small" title="Fit the whole canvas on screen and straighten it (0). Pan with Space+drag, the middle mouse button or two fingers." onClick={() => setView(FIT_VIEW)}>Fit</button>
+      </div>
     </div>
   );
 }

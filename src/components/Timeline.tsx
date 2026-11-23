@@ -5,7 +5,7 @@ import { celIndexAt, celStart, dropIndex, dropSlot, layerLength, sceneLength, ty
 const FW = 26; // frame width in px
 const DRAG_THRESHOLD = 5; // px of movement before a press becomes a drag
 
-export type FrameAction = 'insert-left' | 'insert-right' | 'duplicate' | 'clear' | 'delete' | 'new-here';
+export type FrameAction = 'insert-left' | 'insert-right' | 'duplicate' | 'clear' | 'delete' | 'new-here' | 'copy' | 'paste';
 
 interface Props {
   project: Project;
@@ -20,6 +20,8 @@ interface Props {
   onDuplicate: () => void;
   onDelete: () => void;
   onFrameAction: (action: FrameAction, layerId: string, frame: number) => void;
+  /** Something has been copied and can be pasted. */
+  canPaste: boolean;
   onMoveCel: (layerId: string, from: number, to: number) => void;
   onUpdateLayer: (layerId: string, patch: Partial<Pick<Layer, 'visible' | 'locked'>>) => void;
 }
@@ -291,9 +293,15 @@ export function Timeline(props: Props) {
         <div className="frame-menu" role="menu" aria-label="Frame" style={{ left: menu.x, top: menu.y }}>
           <div className="frame-menu-title">{menuLayer.name} · frame {menu.frame + 1}</div>
           {menuCel < 0 ? (
-            <button role="menuitem" disabled={menuLayer.locked} onClick={() => act('new-here')}>New drawing here</button>
+            <>
+              <button role="menuitem" disabled={menuLayer.locked} onClick={() => act('new-here')}>New drawing here</button>
+              <button role="menuitem" disabled={menuLayer.locked || !props.canPaste} title="Paste what you copied into a new drawing here" onClick={() => act('paste')}>Paste here</button>
+            </>
           ) : (
             <>
+              <button role="menuitem" disabled={!menuDrawing?.strokes.length} title="Copy this drawing to paste it on another frame or layer (Ctrl+C)" onClick={() => act('copy')}>Copy drawing</button>
+              <button role="menuitem" disabled={menuLayer.locked || !props.canPaste} title="Paste what you copied on top of this drawing (Ctrl+V)" onClick={() => act('paste')}>Paste into drawing</button>
+              <div className="frame-menu-sep" />
               <button role="menuitem" disabled={menuLayer.locked} onClick={() => act('insert-left')}>Insert drawing to the left</button>
               <button role="menuitem" disabled={menuLayer.locked} onClick={() => act('insert-right')}>Insert drawing to the right</button>
               <button role="menuitem" disabled={menuLayer.locked} onClick={() => act('duplicate')}>Duplicate</button>

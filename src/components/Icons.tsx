@@ -40,3 +40,8 @@ export const Ellipse = () => <Icon size={20}><ellipse cx="12" cy="12" rx="8" ry=
 export const Bucket = () => <Icon size={20}><path d="M5 11l7-7 7 7-7 7z" /><path d="M5 11h14" /><path d="M20 15c0 1.5-1 3-1 3s-1-1.5-1-3a1 1 0 0 1 2 0z" /></Icon>;
 export const Dropper = () => <Icon size={20}><path d="M14 4l6 6" /><path d="M17 7l-9 9-3 1 1-3 9-9" /><path d="M15 3l6 6" /></Icon>;
 export const Lasso = () => <Icon size={20}><ellipse cx="12" cy="9" rx="8" ry="5" strokeDasharray="3 2.5" /><path d="M7 13c-1 2 0 4 2 4s2 2 1 4" /></Icon>;
+export const Minus = () => <Icon size={16}><path d="M5 12h14" /></Icon>;
+export const RotateLeft = () => <Icon size={16}><path d="M4 4v5h5" /><path d="M4.5 9A8 8 0 1 1 6 17" /></Icon>;
+export const RotateRight = () => <Icon size={16}><path d="M20 4v5h-5" /><path d="M19.5 9A8 8 0 1 0 18 17" /></Icon>;
+export const Mirror = () => <Icon size={16}><path d="M12 3v18" strokeDasharray="2 2" /><path d="M9 7L3 17h6zM15 7l6 10h-6z" /></Icon>;
+export const Copy = () => <Icon size={16}><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3" /></Icon>;

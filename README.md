@@ -3,7 +3,8 @@
 A low-friction, frame-by-frame animation app that runs in the browser. Draw on
 screen with a mouse, pen tablet or (later) an Apple Pencil, build the scene from
 layers that each have their own timing, flip through it with onion skin, and
-export a GIF. Photos of paper drawings come next (see the roadmap).
+export a GIF. It aims to have the standard tools of a digital 2D animation
+app, built step by step (see the roadmap).
 
 Everything runs locally in your browser: there is no server and no account.
 Your current animation is saved in the browser automatically, and you can save
@@ -43,7 +44,7 @@ npm run build    # static site in dist/
 
 | Key | Action |
 | --- | --- |
-| Space | Play / pause |
+| Space | Tap to play / pause, hold and drag to pan the canvas |
 | ← / → or , / . | Previous / next frame |
 | Home / End | First / last frame |
 | B / E | Brush / eraser |
@@ -55,9 +56,17 @@ npm run build    # static site in dist/
 | N | New drawing after the current one |
 | D | Duplicate the current drawing |
 | O | Onion skin on / off |
-
-In the timeline, click the selected drawing again (or right-click any drawing) for a menu to insert a drawing to the left or right, duplicate, clear or delete it. Drag a drawing along its layer to move it.
+| Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste the selection, or the whole drawing when nothing is selected |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
+| + / − or mouse wheel | Zoom in / out (the wheel zooms around the pointer) |
+| 0 / 1 | Fit to screen / actual size |
+| 4 / 6 / 5 | Rotate the view left / right / straighten it |
+| M | Mirror the view (the drawing isn't changed) |
+| Middle mouse drag | Pan the canvas |
+
+On a touch screen, pinch with two fingers to zoom, pan and rotate.
+
+In the timeline, click the selected drawing again (or right-click any drawing) for a menu to copy or paste a drawing, insert one to the left or right, duplicate, clear or delete it. Drag a drawing along its layer to move it.
 
 ## Layout
 
@@ -65,6 +74,7 @@ In the timeline, click the selected drawing again (or right-click any drawing) f
 src/
   model/project.ts     data model + pure timeline/layer operations (tested)
   model/history.ts     undo/redo over immutable snapshots
+  model/view.ts        canvas zoom / pan / rotation / mirror maths (tested)
   render/render.ts     stroke rendering, bitmap cache, frame compositing, onion skin
   export/gif.ts        GIF export
   storage.ts           IndexedDB autosave, project files
@@ -73,7 +83,12 @@ src/
 
 ## Roadmap
 
-1. **Draw on screen with layers** (this version)
-2. Photos of paper drawings as layers: page detection, flattening, cleanup to line art
-3. Alignment with registration marks, MP4 export
-4. Live camera capture with onion skin, installable app for iPad
+Computer first: the standard tools of a digital 2D animation app.
+
+1. **Canvas navigation and copy/paste**: zoom, pan, rotate, mirror, fit; copy and paste drawings between frames and layers (this version)
+2. Brushes: opacity, stabilizer, presets (pencil, ink, marker, soft) and a saved palette
+3. Timing: audio track for lip-sync, camera moves, more onion skin controls
+4. Layers: groups, blend modes, clipping masks
+5. Extras: text, gradients, symmetry, rulers and guides, a reference image layer, custom shortcuts
+
+Later: MP4 export and an installable app for iPad. Importing photos of paper drawings is parked.

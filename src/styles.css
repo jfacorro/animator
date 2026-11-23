@@ -229,3 +229,23 @@ input[type='checkbox'] { accent-color: var(--accent); }
 .tool-options .hint { color: var(--muted); }
 .tool-rail { overflow-y: auto; }
 .tool-rail .icon-btn { width: 44px; height: 40px; flex-shrink: 0; }
+
+/* Canvas view: zoom, pan, rotate, mirror */
+.canvas-wrap { transform-origin: 50% 50%; will-change: transform; }
+.stage.pan, .stage.pan canvas { cursor: grab; }
+.stage.grabbing, .stage.grabbing canvas { cursor: grabbing; }
+.view-controls {
+  position: absolute; right: 12px; bottom: 12px; display: flex; align-items: center; gap: 2px; padding: 4px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 4px 16px #0005;
+}
+.view-controls .icon-btn { width: 30px; height: 30px; }
+.view-controls .sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
+.zoom-value {
+  min-width: 52px; height: 30px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--text);
+  font: inherit; font-variant-numeric: tabular-nums; cursor: pointer;
+}
+.zoom-value:hover { background: var(--control); }
+.toast {
+  position: fixed; left: 50%; bottom: 190px; transform: translateX(-50%); background: #000d; color: var(--text);
+  padding: 6px 14px; border-radius: 999px; pointer-events: none; z-index: 50;
+}
