@@ -269,3 +269,11 @@ input[type='checkbox'] { accent-color: var(--accent); }
 button.file-status.paused {
   color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 3px 10px; cursor: pointer;
 }
+
+/* Brushes and palette */
+.tool-options { gap: 16px; }
+.tool-options input[type=range] { width: 96px; }
+.presets { display: flex; align-items: center; gap: 4px; }
+.link-btn { border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline; padding: 0; }
+.link-btn:hover { color: var(--text); }
+.swatches .icon-btn.sm:disabled { opacity: 0.35; }

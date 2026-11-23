@@ -23,6 +23,10 @@ export interface Stroke {
   kind?: StrokeKind;
   /** Rectangles and ellipses: fill instead of outline. */
   filled?: boolean;
+  /** 0–1, default 1. Applied to the whole stroke, so it doesn't darken where it crosses itself. */
+  opacity?: number;
+  /** 0–1, default 0. Blurs the stroke's edge. */
+  softness?: number;
   /** Paint-bucket fills: the filled pixels as [y, x0, x1, ...] runs. */
   spans?: number[];
   /** Set when a selection was moved or scaled. */

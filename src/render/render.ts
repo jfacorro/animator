@@ -73,6 +73,13 @@ export function paintStroke(ctx: CanvasRenderingContext2D, s: Stroke, live = fal
   ctx.save();
   if (s.matrix) ctx.transform(...s.matrix);
   ctx.globalCompositeOperation = s.erase ? 'destination-out' : 'source-over';
+  if (!s.erase && s.opacity !== undefined && s.opacity < 1) ctx.globalAlpha *= s.opacity;
+  // Soft edges: blur in screen pixels, scaled by how much the stroke's matrix enlarges it.
+  if (s.softness && !s.erase && 'filter' in ctx) {
+    const m = s.matrix;
+    const grow = m ? Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) : 1;
+    ctx.filter = `blur(${(s.size * s.softness * 0.3 * grow).toFixed(2)}px)`;
+  }
   const color = s.erase ? '#000' : s.color;
   const outline = kind === 'line' || ((kind === 'rect' || kind === 'ellipse') && !s.filled);
   if (outline) {

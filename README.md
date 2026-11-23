@@ -29,6 +29,13 @@ npm run build    # static site in dist/
   pressure comes from the browser's Pointer Events; mouse strokes simulate it
   from speed (turn off "Pressure" for an even line). The eraser only affects
   the drawing it is used on.
+- **Brushes.** Pencil, Ink, Marker and Soft presets set size, opacity,
+  smoothing, stabilizer, pressure and edge softness; any of them can be tuned.
+  Opacity applies to the whole stroke, so a stroke doesn't darken where it
+  crosses itself, while overlapping strokes build up. The stabilizer makes the
+  line trail the pointer (shown by an orange string) and catches up when you
+  let go. The palette and your last brush are kept in the browser: **+** adds
+  the current colour, right-click a swatch to remove it.
 - **Tools.** Lines, rectangles and ellipses are stored as shapes; the fill
   bucket stores the filled pixels as runs and paints them under the lines of
   the same drawing; the lasso selects whole strokes and moves/resizes them by
@@ -38,7 +45,7 @@ npm run build    # static site in dist/
 - **Export.** GIFs are encoded in the browser with
   [gifenc](https://github.com/mattdesl/gifenc). Held drawings become a single
   GIF frame with a longer delay, so files stay small.
-- **Storage.** The project autosaves to IndexedDB. In Chrome and Edge, *Save to
+- **Storage.** The project autosaves to IndexedDB after every change. In Chrome and Edge, *Save to
   file…* (or *Open from file…*) links the animation to a file on disk, and every
   change after that also saves to that file. Elsewhere, saving downloads a copy.
 

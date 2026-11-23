@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { scaleAbout, strokeBounds, strokesInLasso, translate, unionBoxes, apply, type Box, type Matrix, type Vec } from '../model/geometry';
 import { addStroke, drawingAt, transformStrokes, type Point, type Project, type Stroke } from '../model/project';
 import { floodFillSpans } from '../render/fill';
+import { catchUp, stabilize } from '../model/brushes';
 import { composeFrame, paintStroke, type OnionOptions } from '../render/render';
 import { FIT_VIEW, flipAt, pinch, rotateAt, screenToLocal, snapRotation, viewTransform, zoomAt, type View } from '../model/view';
 import * as I from './Icons';
@@ -14,6 +15,14 @@ export interface BrushSettings {
   eraserSize: number;
   smoothing: number;
   pressure: boolean;
+  /** 0–1: see-through to solid. Also used by shapes and fills. */
+  opacity: number;
+  /** 0–1: how far the line trails the pointer to steady it. */
+  stabilizer: number;
+  /** Width change with pressure, used when `pressure` is on. */
+  thinning: number;
+  /** 0–1: blurred edge. */
+  softness: number;
   /** Rectangles and ellipses are filled instead of outlined. */
   fillShapes: boolean;
 }
@@ -43,7 +52,7 @@ type Nav =
   | { type: 'pinch'; ids: [number, number]; start: [Vec, Vec]; view: View };
 
 type Gesture =
-  | { type: 'stroke'; pointerId: number; stroke: Stroke }
+  | { type: 'stroke'; pointerId: number; stroke: Stroke; tip: Point; pointer: Point }
   | { type: 'shape'; pointerId: number; stroke: Stroke; start: Vec }
   | { type: 'lasso'; pointerId: number; points: Vec[] }
   | { type: 'move'; pointerId: number; start: Vec; matrix: Matrix }
@@ -289,6 +298,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     }
     const stroke: Stroke = {
       kind: 'fill', spans, points: [[x, y, 0.5]], color: brush.color, size: 0, erase: false, smoothing: 0, simulatePressure: false, thinning: 0,
+      ...(brush.opacity < 1 ? { opacity: brush.opacity } : {}),
     };
     onCommit((p) => addStroke(p, activeLayerId, frame, stroke, true));
   };
@@ -344,6 +354,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
         stroke: {
           kind: tool as Stroke['kind'], points: [pt, pt], color: brush.color, size: brush.size, erase: false,
           smoothing: 0, simulatePressure: false, thinning: 0, filled: tool !== 'line' && brush.fillShapes,
+          ...(brush.opacity < 1 ? { opacity: brush.opacity } : {}),
         },
       };
       schedulePaint();
@@ -351,17 +362,20 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     }
 
     const pen = e.pointerType === 'pen' && brush.pressure;
+    const first = toPoint(e, pen);
     gestureRef.current = {
-      type: 'stroke', pointerId: id,
+      type: 'stroke', pointerId: id, tip: first, pointer: first,
       stroke: {
-        points: [toPoint(e, pen)],
+        points: [first],
         color: brush.color,
         size: erase ? brush.eraserSize : brush.size,
         erase,
         smoothing: brush.smoothing,
         // Mouse and touch have no pressure: fake it from speed, unless turned off.
         simulatePressure: brush.pressure && !pen && !erase,
-        thinning: brush.pressure && !erase ? 0.6 : 0,
+        thinning: brush.pressure && !erase ? brush.thinning : 0,
+        ...(!erase && brush.opacity < 1 ? { opacity: brush.opacity } : {}),
+        ...(!erase && brush.softness > 0 ? { softness: brush.softness } : {}),
       },
     };
     schedulePaint();
@@ -377,7 +391,11 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     if (g.type === 'stroke') {
       const pen = e.pointerType === 'pen' && brush.pressure;
       const events = e.nativeEvent.getCoalescedEvents?.() ?? [];
-      const pts = events.length ? events.map((ev) => toPoint(ev, pen)) : [toPoint(e, pen)];
+      const raw = events.length ? events.map((ev) => toPoint(ev, pen)) : [toPoint(e, pen)];
+      // The eraser isn't stabilized: it should go exactly where you point.
+      const amount = g.stroke.erase ? 0 : brush.stabilizer;
+      const pts = raw.map((pt) => (g.tip = amount ? stabilize(g.tip, pt, amount) : pt));
+      g.pointer = raw.at(-1)!;
       g.stroke = { ...g.stroke, points: [...g.stroke.points, ...pts] };
     } else if (g.type === 'shape') {
       let [ex, ey] = [x, y];
@@ -422,7 +440,9 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     cancelAnimationFrame(rafRef.current);
 
     if (g.type === 'stroke') {
-      onCommit((p) => addStroke(p, activeLayerId, frame, g.stroke));
+      const tail = catchUp(g.tip, g.pointer);
+      const stroke = tail.length ? { ...g.stroke, points: [...g.stroke.points, ...tail] } : g.stroke;
+      onCommit((p) => addStroke(p, activeLayerId, frame, stroke));
     } else if (g.type === 'shape') {
       const [a, b] = g.stroke.points;
       if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 1) onCommit((p) => addStroke(p, activeLayerId, frame, g.stroke));
@@ -480,8 +500,15 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
           onPointerCancel={finish}
           onPointerLeave={() => setCursor(null)}
         />
-        {(box || g?.type === 'lasso') && (
+        {(box || g?.type === 'lasso' || (g?.type === 'stroke' && brush.stabilizer > 0 && !g.stroke.erase)) && (
           <svg className="overlay" viewBox={`0 0 ${project.width} ${project.height}`} aria-hidden="true">
+            {g?.type === 'stroke' && (
+              // Stabilizer: a string from the pointer to the trailing pen tip.
+              <g>
+                <line x1={g.tip[0]} y1={g.tip[1]} x2={g.pointer[0]} y2={g.pointer[1]} stroke="#f0a43a" strokeWidth={1.2 / vs} />
+                <circle cx={g.pointer[0]} cy={g.pointer[1]} r={3 / vs} fill="#f0a43a" />
+              </g>
+            )}
             {g?.type === 'lasso' && (
               <polyline points={g.points.map((p) => p.join(',')).join(' ')} fill="rgba(240,164,58,0.08)" stroke="#f0a43a" strokeWidth={1.5 / vs} strokeDasharray={`${5 / vs} ${4 / vs}`} />
             )}
