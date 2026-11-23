@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import * as I from './Icons';
 import { celIndexAt, celStart, dropIndex, dropSlot, layerLength, sceneLength, type Layer, type Project } from '../model/project';
 
 const FW = 26; // frame width in px
@@ -20,6 +21,7 @@ interface Props {
   onDelete: () => void;
   onFrameAction: (action: FrameAction, layerId: string, frame: number) => void;
   onMoveCel: (layerId: string, from: number, to: number) => void;
+  onUpdateLayer: (layerId: string, patch: Partial<Pick<Layer, 'visible' | 'locked'>>) => void;
 }
 
 interface Press {
@@ -190,11 +192,25 @@ export function Timeline(props: Props) {
           {topFirst.map((l) => (
             <div
               key={l.id}
-              className={`track-name${l.id === activeLayerId ? ' active' : ''}`}
+              className={`track-name${l.id === activeLayerId ? ' active' : ''}${l.visible ? '' : ' hidden'}`}
               onClick={() => props.onSelect(l.id, frame)}
               title={`${l.name}: click to draw on this layer`}
             >
-              {l.name}
+              <span className="track-label">{l.name}</span>
+              <button
+                className="icon-btn xs" aria-label={l.visible ? `Hide ${l.name}` : `Show ${l.name}`}
+                title={l.visible ? 'Hide this layer' : 'Show this layer'}
+                onClick={(e) => { e.stopPropagation(); props.onUpdateLayer(l.id, { visible: !l.visible }); }}
+              >
+                {l.visible ? <I.Eye /> : <I.EyeOff />}
+              </button>
+              <button
+                className={`icon-btn xs${l.locked ? ' locked' : ''}`} aria-label={l.locked ? `Unlock ${l.name}` : `Lock ${l.name}`}
+                title={l.locked ? 'Unlock this layer' : 'Lock this layer so it can\'t be drawn on or edited'}
+                onClick={(e) => { e.stopPropagation(); props.onUpdateLayer(l.id, { locked: !l.locked }); }}
+              >
+                {l.locked ? <I.Lock /> : <I.Unlock />}
+              </button>
             </div>
           ))}
         </div>
