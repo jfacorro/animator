@@ -156,25 +156,78 @@ export function addStroke(project: Project, layerId: string, frame: number, stro
 }
 
 /**
- * Insert a new empty drawing right after the cel at `frame` (or at the end).
+ * Insert a new empty drawing right before or after the cel at `frame`, with
+ * the same hold. Past the layer's end, the drawing starts at `frame`.
  * Returns the frame where the new drawing starts.
  */
-export function insertDrawingAfter(project: Project, layerId: string, frame: number): { project: Project; frame: number } {
+export function insertDrawing(
+  project: Project,
+  layerId: string,
+  frame: number,
+  side: 'before' | 'after' = 'after',
+): { project: Project; frame: number } {
   const layer = findLayer(project, layerId);
-  const d = createDrawing();
-  const drawings = { ...project.drawings, [d.id]: d };
-  let i = celIndexAt(layer, frame);
+  const i = celIndexAt(layer, frame);
   if (i < 0) {
     // Past the end: start the new drawing at this frame, filling any gap.
     const ensured = ensureDrawingAt(project, layerId, frame);
     return { project: ensured.project, frame };
   }
-  const hold = layer.cels[i].hold;
+  const d = createDrawing();
+  const drawings = { ...project.drawings, [d.id]: d };
+  const at = side === 'after' ? i + 1 : i;
   const cels = [...layer.cels];
-  cels.splice(i + 1, 0, { drawingId: d.id, hold });
-  i += 1;
+  cels.splice(at, 0, { drawingId: d.id, hold: layer.cels[i].hold });
   const next = { ...mapLayer(project, layerId, (l) => ({ ...l, cels })), drawings };
-  return { project: next, frame: celStart({ ...layer, cels }, i) };
+  return { project: next, frame: celStart({ ...layer, cels }, at) };
+}
+
+export function insertDrawingAfter(project: Project, layerId: string, frame: number) {
+  return insertDrawing(project, layerId, frame, 'after');
+}
+
+/** Erase everything in the drawing at `frame`, keeping its place and hold. */
+export function clearCelAt(project: Project, layerId: string, frame: number): Project {
+  const layer = findLayer(project, layerId);
+  const i = celIndexAt(layer, frame);
+  const id = i >= 0 ? layer.cels[i].drawingId : null;
+  if (!id || !project.drawings[id]?.strokes.length) return project;
+  return { ...project, drawings: { ...project.drawings, [id]: { ...project.drawings[id], strokes: [] } } };
+}
+
+/**
+ * Move the cel at index `from` so it ends up at index `to` (an index into the
+ * resulting list). Returns the frame where the moved cel now starts.
+ */
+export function moveCel(project: Project, layerId: string, from: number, to: number): { project: Project; frame: number } {
+  const layer = findLayer(project, layerId);
+  const n = layer.cels.length;
+  if (from < 0 || from >= n) return { project, frame: 0 };
+  const target = Math.max(0, Math.min(n - 1, to));
+  if (target === from) return { project, frame: celStart(layer, from) };
+  const cels = [...layer.cels];
+  const [cel] = cels.splice(from, 1);
+  cels.splice(target, 0, cel);
+  return { project: mapLayer(project, layerId, (l) => ({ ...l, cels })), frame: celStart({ ...layer, cels }, target) };
+}
+
+/**
+ * The gap a dragged cel would drop into when released over `frame` (plus a
+ * `fraction` of that frame): the first half of a cel means the gap before it,
+ * the second half the gap after it, and past the end the last gap. Gaps are
+ * numbered 0..cels.length, in the list before the dragged cel is removed.
+ */
+export function dropSlot(layer: Layer, frame: number, fraction: number): number {
+  const over = celIndexAt(layer, frame);
+  if (over < 0) return frame < 0 ? 0 : layer.cels.length;
+  const pos = (frame - celStart(layer, over) + fraction) / layer.cels[over].hold;
+  return pos < 0.5 ? over : over + 1;
+}
+
+/** The index a cel dragged from `from` ends up at, for `moveCel`. */
+export function dropIndex(layer: Layer, from: number, frame: number, fraction: number): number {
+  const slot = dropSlot(layer, frame, fraction);
+  return Math.min(layer.cels.length - 1, slot > from ? slot - 1 : slot);
 }
 
 /** Copy the drawing at `frame` into a new cel right after it. */

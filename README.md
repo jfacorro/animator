@@ -47,6 +47,8 @@ npm run build    # static site in dist/
 | N | New drawing after the current one |
 | D | Duplicate the current drawing |
 | O | Onion skin on / off |
+
+In the timeline, click the selected drawing again (or right-click any drawing) for a menu to insert a drawing to the left or right, duplicate, clear or delete it. Drag a drawing along its layer to move it.
 | Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
 
 ## Layout

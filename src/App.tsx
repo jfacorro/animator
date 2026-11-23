@@ -3,7 +3,7 @@ import { ExportDialog } from './components/ExportDialog';
 import * as I from './components/Icons';
 import { LayersPanel, type OnionState } from './components/LayersPanel';
 import { Stage, type BrushSettings, type Tool } from './components/Stage';
-import { Timeline } from './components/Timeline';
+import { Timeline, type FrameAction } from './components/Timeline';
 import { commit, initHistory, redo, undo, type History } from './model/history';
 import * as P from './model/project';
 import { loadCurrentProject, readProjectFile, saveCurrentProject, saveProjectFile } from './storage';
@@ -114,6 +114,33 @@ export default function App() {
     setFrame(r.frame);
   }, [apply, activeLayerId, frame, project]);
 
+  const onFrameAction = useCallback((action: FrameAction, layerId: string, f: number) => {
+    setPlaying(false);
+    setActiveLayerId(layerId);
+    if (action === 'clear') { apply((p) => P.clearCelAt(p, layerId, f)); setFrame(f); return; }
+    if (action === 'delete') {
+      const layer = project.layers.find((l) => l.id === layerId);
+      const i = layer ? P.celIndexAt(layer, f) : -1;
+      apply((p) => P.deleteCelAt(p, layerId, f));
+      // Stay on the start of the drawing that slid into this spot.
+      setFrame(layer && i >= 0 ? P.celStart(layer, i) : f);
+      return;
+    }
+    const r =
+      action === 'duplicate' ? P.duplicateCelAt(project, layerId, f)
+      : action === 'insert-left' ? P.insertDrawing(project, layerId, f, 'before')
+      : P.insertDrawing(project, layerId, f, 'after'); // insert-right, new-here
+    apply(() => r.project);
+    setFrame(r.frame);
+  }, [apply, project]);
+
+  const onMoveCel = useCallback((layerId: string, from: number, to: number) => {
+    const r = P.moveCel(project, layerId, from, to);
+    apply(() => r.project);
+    setActiveLayerId(layerId);
+    setFrame(r.frame);
+  }, [apply, project]);
+
   const onStroke = useCallback((stroke: P.Stroke) => apply((p) => P.addStroke(p, activeLayerId, frame, stroke)), [apply, activeLayerId, frame]);
 
   const onion$ = useMemo(
@@ -176,7 +203,7 @@ export default function App() {
       <header className="topbar">
         <div className="brand"><I.Logo /> Animator</div>
         <input
-          className="project-name" type="text" aria-label="Animation name" value={project.name}
+          className="project-name" type="text" aria-label="Animation name" title="Name of this animation, used for exported files" value={project.name}
           onChange={(e) => apply((p) => ({ ...p, name: e.target.value }), false)}
           onBlur={(e) => apply((p) => ({ ...p, name: e.target.value.trim() || 'Untitled animation' }))}
         />
@@ -188,25 +215,25 @@ export default function App() {
           <button className="icon-btn" aria-label="Next frame" title="Next frame (→)" onClick={() => goTo(frame + 1)}><I.Next /></button>
           <button className="icon-btn" aria-label="Last frame" title="Last frame (End)" onClick={() => goTo(length - 1)}><I.Last /></button>
           <span className="frame-count">Frame <strong>{frame + 1}</strong> <span className="muted">/ {length}</span></span>
-          <label className="muted" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>Speed
+          <label className="muted" style={{ display: 'flex', alignItems: 'center', gap: 6 }} title="Playback speed in frames per second. 12 fps is common for hand-drawn animation.">Speed
             <select value={project.fps} onChange={(e) => apply((p) => ({ ...p, fps: Number(e.target.value) }))}>
               {[6, 8, 12, 15, 24].map((f) => <option key={f} value={f}>{f} fps</option>)}
             </select>
           </label>
-          <button className={`btn small${loop ? ' on' : ''}`} style={{ marginLeft: 6 }} aria-pressed={loop} onClick={() => setLoop((l) => !l)}>Loop</button>
+          <button className={`btn small${loop ? ' on' : ''}`} style={{ marginLeft: 6 }} aria-pressed={loop} title="Start again from the first frame when playback reaches the end" onClick={() => setLoop((l) => !l)}>Loop</button>
         </div>
         <div className="spacer" />
-        <button className={`btn${onion.enabled ? ' on' : ''}`} aria-pressed={onion.enabled} title="Onion skin (O)" onClick={() => setOnion((o) => ({ ...o, enabled: !o.enabled }))}>
+        <button className={`btn${onion.enabled ? ' on' : ''}`} aria-pressed={onion.enabled} title="Show the previous drawings in red and the next ones in blue, faintly, while you draw (O)" onClick={() => setOnion((o) => ({ ...o, enabled: !o.enabled }))}>
           <span className="onion-dots"><i style={{ background: 'var(--onion-before)' }} /><i style={{ background: 'var(--onion-after)' }} /></span>
           Onion skin
         </button>
         <div className="menu">
-          <button className="icon-btn" aria-label="File menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((m) => !m)}><I.More /></button>
+          <button className="icon-btn" aria-label="File menu" title="New, open and save animations" aria-expanded={menuOpen} onClick={() => setMenuOpen((m) => !m)}><I.More /></button>
           {menuOpen && (
             <div className="menu-list" onMouseLeave={() => setMenuOpen(false)}>
-              <button onClick={newProject}>New animation</button>
-              <button onClick={() => { setMenuOpen(false); fileInput.current?.click(); }}>Open from file…</button>
-              <button onClick={() => { setMenuOpen(false); saveProjectFile(project); }}>Save to file</button>
+              <button onClick={newProject} title="Start a blank animation, replacing the current one">New animation</button>
+              <button onClick={() => { setMenuOpen(false); fileInput.current?.click(); }} title="Open an animation saved with Save to file">Open from file…</button>
+              <button onClick={() => { setMenuOpen(false); saveProjectFile(project); }} title="Download this animation as a file you can back up or open later. It also saves automatically in this browser.">Save to file</button>
             </div>
           )}
           <input
@@ -214,12 +241,12 @@ export default function App() {
             onChange={(e) => { const f = e.target.files?.[0]; if (f) openFile(f); e.target.value = ''; }}
           />
         </div>
-        <button className="btn primary" onClick={() => { setPlaying(false); setExporting(true); }}>Export</button>
+        <button className="btn primary" title="Export the animation as a GIF" onClick={() => { setPlaying(false); setExporting(true); }}>Export</button>
       </header>
 
       <div className="tool-options">
         <span className="tool-name">{isEraser ? 'Eraser' : 'Brush'}</span>
-        <label>Size
+        <label title={isEraser ? 'Width of the eraser in pixels ([ and ] to change)' : 'Width of the line in pixels ([ and ] to change)'}>Size
           <input
             type="range" min={1} max={isEraser ? 120 : 60} value={size}
             onChange={(e) => setBrush((b) => (isEraser ? { ...b, eraserSize: Number(e.target.value) } : { ...b, size: Number(e.target.value) }))}
@@ -228,17 +255,17 @@ export default function App() {
         </label>
         {!isEraser && (
           <>
-            <label>Smoothing
+            <label title="Evens out shaky lines. Higher values give smoother curves but follow the pen less closely.">Smoothing
               <input type="range" min={0} max={100} value={Math.round(brush.smoothing * 100)} onChange={(e) => setBrush((b) => ({ ...b, smoothing: Number(e.target.value) / 100 }))} />
               <span className="value">{Math.round(brush.smoothing * 100)}%</span>
             </label>
-            <label><input type="checkbox" checked={brush.pressure} onChange={(e) => setBrush((b) => ({ ...b, pressure: e.target.checked }))} /> Pressure</label>
+            <label title="Lines get thicker when you press harder with a pen or tablet. With a mouse it imitates pressure from drawing speed. Untick for an even line width."><input type="checkbox" checked={brush.pressure} onChange={(e) => setBrush((b) => ({ ...b, pressure: e.target.checked }))} /> Pressure</label>
             <div className="swatches" role="group" aria-label="Colour">
               Colour
               {SWATCHES.map((c) => (
-                <button key={c} className={`swatch${brush.color === c ? ' on' : ''}`} style={{ background: c }} aria-label={`Colour ${c}`} onClick={() => setBrush((b) => ({ ...b, color: c }))} />
+                <button key={c} className={`swatch${brush.color === c ? ' on' : ''}`} style={{ background: c }} aria-label={`Colour ${c}`} title="Brush colour" onClick={() => setBrush((b) => ({ ...b, color: c }))} />
               ))}
-              <input className="color-input" type="color" aria-label="Custom colour" value={brush.color} onChange={(e) => setBrush((b) => ({ ...b, color: e.target.value }))} />
+              <input className="color-input" type="color" aria-label="Custom colour" title="Pick any colour" value={brush.color} onChange={(e) => setBrush((b) => ({ ...b, color: e.target.value }))} />
             </div>
           </>
         )}
@@ -285,6 +312,8 @@ export default function App() {
         onNewDrawing={newDrawing}
         onDuplicate={duplicate}
         onDelete={() => apply((p) => P.deleteCelAt(p, activeLayerId, frame))}
+        onFrameAction={onFrameAction}
+        onMoveCel={onMoveCel}
       />
 
       {exporting && <ExportDialog project={project} onClose={() => setExporting(false)} />}
