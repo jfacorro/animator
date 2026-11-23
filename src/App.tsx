@@ -7,6 +7,7 @@ import { Timeline, type FrameAction } from './components/Timeline';
 import { commit, initHistory, redo, undo, type History } from './model/history';
 import { scaleAbout, strokeBounds, translate, unionBoxes } from './model/geometry';
 import * as P from './model/project';
+import { groupLayer, isLocked, isShown, moveGroupToGap, removeGroup, ungroup, updateGroup } from './model/groups';
 import { cameraAt, hasCamera, keyAt, removeCameraKey, setCameraKey } from './model/camera';
 import { readAudioFile, useAudioPlayback } from './audio';
 import { matchingPreset, PRESETS, type BrushPreset } from './model/brushes';
@@ -80,6 +81,8 @@ export default function App() {
     ...b, size: p.size, opacity: p.opacity, smoothing: p.smoothing, stabilizer: p.stabilizer, thinning: p.thinning, softness: p.softness, pressure: p.thinning > 0,
   }));
   const [selection, setSelection] = useState<number[] | null>(null);
+  /** A group row selected in the Layers panel (its opacity and blend show there). */
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [onion, setOnion] = useState<OnionState>(() => ({ ...DEFAULT_ONION, ...loadPref<Partial<OnionState>>(ONION_KEY, {}, (v) => typeof v === 'object') }));
   useEffect(() => { savePref(ONION_KEY, onion); }, [onion]);
   const [playing, setPlaying] = useState(false);
@@ -317,7 +320,7 @@ export default function App() {
     if (!clipboard) { notify('Copy a drawing or a selection first (Ctrl+C)'); return; }
     const layer = project.layers.find((l) => l.id === layerId);
     if (!layer) return;
-    if (layer.locked || !layer.visible) { notify(layer.locked ? 'This layer is locked' : 'This layer is hidden'); return; }
+    if (isLocked(project, layer) || !isShown(project, layer)) { notify(isLocked(project, layer) ? 'This layer is locked' : 'This layer is hidden'); return; }
     const r = P.pasteStrokes(project, layerId, f, clipboard);
     apply(() => r.project);
     setActiveLayerId(layerId);
@@ -702,7 +705,17 @@ export default function App() {
           }}
           onRemove={(id) => apply((p) => P.removeLayer(p, id))}
           onMove={(id, delta) => apply((p) => P.moveLayer(p, id, delta))}
-          onMoveTo={(id, gap) => apply((p) => P.moveLayerToGap(p, id, gap))}
+          onDrop={(id, kind, drop) => apply((p) => (kind === 'group' ? moveGroupToGap(p, id, drop.gap) : P.moveLayerToGap(p, id, drop.gap, drop.group)))}
+          selectedGroupId={selectedGroupId}
+          onSelectGroup={setSelectedGroupId}
+          onUpdateGroup={(id, patch, record = true) => apply((p) => updateGroup(p, id, patch), record)}
+          onGroup={(layerId) => {
+            const r = groupLayer(project, layerId);
+            apply(() => r.project);
+            setSelectedGroupId(r.groupId);
+          }}
+          onUngroup={(id) => { apply((p) => ungroup(p, id)); setSelectedGroupId(null); }}
+          onRemoveGroup={(id) => { apply((p) => removeGroup(p, id)); setSelectedGroupId(null); }}
           onUpdate={(id, patch, record = true) => apply((p) => P.updateLayer(p, id, patch), record)}
           onOnionChange={setOnion}
         />
@@ -713,7 +726,7 @@ export default function App() {
         frame={frame}
         activeLayerId={activeLayerId}
         playing={playing}
-        onSelect={(layerId, f) => { setActiveLayerId(layerId); goTo(f); }}
+        onSelect={(layerId, f) => { setActiveLayerId(layerId); setSelectedGroupId(null); goTo(f); }}
         onSelectFrame={goTo}
         onHold={(h) => apply((p) => P.setHoldAt(p, activeLayerId, frame, h))}
         onHoldToEnd={() => apply((p) => P.holdToEnd(p, activeLayerId, frame))}
@@ -731,7 +744,7 @@ export default function App() {
         onRemoveCameraKey={(f) => apply((p) => removeCameraKey(p, f))}
         onMoveCel={onMoveCel}
         onUpdateLayer={(id, patch) => apply((p) => P.updateLayer(p, id, patch))}
-        onMoveLayerTo={(id, gap) => apply((p) => P.moveLayerToGap(p, id, gap))}
+        onMoveLayerTo={(id, gap, group) => apply((p) => P.moveLayerToGap(p, id, gap, group))}
       />
 
       {toast && <div className="toast" role="status">{toast}</div>}

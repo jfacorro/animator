@@ -53,6 +53,27 @@ export interface Layer {
   locked: boolean;
   opacity: number;
   cels: Cel[];
+  /** How the layer mixes with what's under it. Default 'normal'. */
+  blend?: BlendMode;
+  /** Clipping mask: only show where the layer below (its base) has paint. */
+  clip?: boolean;
+  /** The group this layer belongs to. A group's layers sit next to each other. */
+  groupId?: string;
+}
+
+export type BlendMode =
+  | 'normal' | 'multiply' | 'screen' | 'overlay' | 'darken' | 'lighten' | 'add'
+  | 'color-dodge' | 'color-burn' | 'hard-light' | 'soft-light' | 'difference' | 'color' | 'luminosity';
+
+export interface LayerGroup {
+  id: string;
+  name: string;
+  visible: boolean;
+  locked: boolean;
+  opacity: number;
+  blend?: BlendMode;
+  /** Folded shut in the Layers panel. */
+  collapsed?: boolean;
 }
 
 /** A camera position at one frame. Frames between keys are eased between them. */
@@ -93,6 +114,7 @@ export interface Project {
   /** Camera keys sorted by frame. None means the camera shows the whole canvas. */
   camera?: CameraKey[];
   audio?: AudioTrack | null;
+  groups?: Record<string, LayerGroup>;
 }
 
 export const MAX_HOLD = 24;
@@ -389,13 +411,15 @@ export function addLayer(project: Project, name: string, aboveLayerId?: string):
   const layer = createLayer(name, drawings);
   const layers = [...project.layers];
   const at = aboveLayerId ? layers.findIndex((l) => l.id === aboveLayerId) + 1 : layers.length;
-  layers.splice(at <= 0 ? layers.length : at, 0, layer);
+  // A layer added above one in a group joins that group.
+  const groupId = at > 0 ? layers[at - 1]?.groupId : undefined;
+  layers.splice(at <= 0 ? layers.length : at, 0, groupId ? { ...layer, groupId } : layer);
   return { project: { ...project, layers, drawings }, layerId: layer.id };
 }
 
 export function removeLayer(project: Project, layerId: string): Project {
   if (project.layers.length <= 1) return project;
-  return pruneDrawings({ ...project, layers: project.layers.filter((l) => l.id !== layerId) });
+  return pruneGroups(pruneDrawings({ ...project, layers: project.layers.filter((l) => l.id !== layerId) }));
 }
 
 export function updateLayer(project: Project, layerId: string, patch: Partial<Omit<Layer, 'id' | 'cels'>>): Project {
@@ -416,15 +440,47 @@ export function moveLayer(project: Project, layerId: string, delta: number): Pro
  * Move a layer into a gap in the stack. Gaps are numbered bottom to top:
  * 0 is below the bottom layer, layers.length is above the top one.
  */
-export function moveLayerToGap(project: Project, layerId: string, gap: number): Project {
+export function moveLayerToGap(project: Project, layerId: string, gap: number, groupId?: string | null): Project {
   const from = project.layers.findIndex((l) => l.id === layerId);
   if (from < 0) return project;
   const to = Math.max(0, Math.min(project.layers.length - 1, gap > from ? gap - 1 : gap));
-  if (to === from) return project;
+  const current = project.layers[from];
+  const nextGroup = groupId === undefined ? current.groupId : groupId ?? undefined;
+  if (to === from && nextGroup === current.groupId) return project;
   const layers = [...project.layers];
-  const [layer] = layers.splice(from, 1);
-  layers.splice(to, 0, layer);
-  return { ...project, layers };
+  layers.splice(from, 1);
+  const moved: Layer = { ...current };
+  if (nextGroup) moved.groupId = nextGroup;
+  else delete moved.groupId;
+  layers.splice(to, 0, moved);
+  return pruneGroups({ ...project, layers });
+}
+
+export function withoutGroup(l: Layer): Layer {
+  const copy = { ...l };
+  delete copy.groupId;
+  return copy;
+}
+
+/** Drop groups with no layers, and pull each group's layers together under its topmost one. */
+export function pruneGroups(project: Project): Project {
+  if (!project.groups) return project;
+  const used = new Set(project.layers.map((l) => l.groupId).filter(Boolean));
+  let groups: Record<string, LayerGroup> | undefined = Object.fromEntries(Object.entries(project.groups).filter(([id]) => used.has(id)));
+  if (!Object.keys(groups).length) groups = undefined;
+  // Layers naming a group that doesn't exist lose it.
+  let layers: Layer[] = project.layers.map((l) => (l.groupId && !groups?.[l.groupId] ? withoutGroup(l) : l));
+  for (const id of Object.keys(groups ?? {})) {
+    const members = layers.filter((l) => l.groupId === id);
+    const top = layers.map((l) => l.groupId).lastIndexOf(id);
+    const first = layers.findIndex((l) => l.groupId === id);
+    if (top - first + 1 === members.length) continue; // already together
+    const others = layers.filter((l) => l.groupId !== id);
+    // Keep the group where its top layer was: count the other layers below that point.
+    const below = layers.slice(0, top + 1).filter((l) => l.groupId !== id).length;
+    layers = [...others.slice(0, below), ...members, ...others.slice(below)];
+  }
+  return { ...project, layers, groups };
 }
 
 /** Drop drawings no cel points at any more. */

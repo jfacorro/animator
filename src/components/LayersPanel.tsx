@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { drawingAt, layerLength, type Layer, type Project } from '../model/project';
+import { drawingAt, layerLength, type Layer, type LayerGroup, type Project } from '../model/project';
+import { BLEND_MODES } from '../model/groups';
 import { drawingBitmap, PAPER } from '../render/render';
 import * as I from './Icons';
-import { useLayerDrag } from './useLayerDrag';
+import { layerDrops, useLayerDrag, type DragKind, type Drop } from './useLayerDrag';
 
 export interface OnionState {
   enabled: boolean;
@@ -27,48 +28,116 @@ interface Props {
   onAdd: () => void;
   onRemove: (id: string) => void;
   onMove: (id: string, delta: number) => void;
-  /** Drag a layer into a gap in the stack, counted bottom to top. */
-  onMoveTo: (id: string, gap: number) => void;
-  onUpdate: (id: string, patch: Partial<Pick<Layer, 'name' | 'visible' | 'locked' | 'opacity'>>, record?: boolean) => void;
+  /** Drag a layer or group to a spot in the stack. */
+  onDrop: (id: string, kind: DragKind, drop: Drop) => void;
+  onUpdate: (id: string, patch: Partial<Pick<Layer, 'name' | 'visible' | 'locked' | 'opacity' | 'blend' | 'clip'>>, record?: boolean) => void;
+  /** The selected group, when a group row was clicked (its settings show below). */
+  selectedGroupId: string | null;
+  onSelectGroup: (id: string | null) => void;
+  onUpdateGroup: (id: string, patch: Partial<Omit<LayerGroup, 'id'>>, record?: boolean) => void;
+  onGroup: (layerId: string) => void;
+  onUngroup: (groupId: string) => void;
+  onRemoveGroup: (groupId: string) => void;
   onOnionChange: (onion: OnionState) => void;
 }
 
 export function LayersPanel(props: Props) {
-  const { project, activeLayerId, onion } = props;
+  const { project, activeLayerId, onion, selectedGroupId } = props;
   const active = project.layers.find((l) => l.id === activeLayerId);
-  const topFirst = [...project.layers].reverse();
+  const group = selectedGroupId ? project.groups?.[selectedGroupId] ?? null : null;
   const index = project.layers.findIndex((l) => l.id === activeLayerId);
-  const drag = useLayerDrag(project.layers.length, props.onMoveTo);
+  const drag = useLayerDrag(props.onDrop);
+
+  // Rows top first, with a header above each group's layers.
+  const rows: React.ReactNode[] = [];
+  const seen = new Set<string>();
+  for (let i = project.layers.length - 1; i >= 0; i--) {
+    const layer = project.layers[i];
+    const g = layer.groupId ? project.groups?.[layer.groupId] : undefined;
+    if (g && !seen.has(g.id)) {
+      seen.add(g.id);
+      const first = project.layers.findIndex((l) => l.groupId === g.id);
+      const below: Drop = g.collapsed ? { gap: first, group: null } : { gap: i + 1, group: g.id };
+      rows.push(
+        <GroupRow
+          key={`g:${g.id}`} group={g} selected={g.id === selectedGroupId} {...props}
+          dragProps={drag.rowProps(`g:${g.id}`, g.id, 'group', { gap: i + 1, group: null }, below)} dragClass={drag.rowClass(`g:${g.id}`)}
+        />,
+      );
+    }
+    if (g?.collapsed) continue;
+    const d = layerDrops(i, layer.groupId);
+    rows.push(
+      <LayerRow
+        key={layer.id} layer={layer} inGroup={!!g} groupHidden={!!g && !g.visible} {...props}
+        dragProps={drag.rowProps(layer.id, layer.id, 'layer', d.above, d.below)} dragClass={drag.rowClass(layer.id)}
+      />,
+    );
+  }
+
+  const opacityTarget = group
+    ? { value: group.opacity, set: (v: number, record: boolean) => props.onUpdateGroup(group.id, { opacity: v }, record), what: 'group' }
+    : active ? { value: active.opacity, set: (v: number, record: boolean) => props.onUpdate(active.id, { opacity: v }, record), what: 'layer' } : null;
+  const blend = group ? group.blend ?? 'normal' : active?.blend ?? 'normal';
+  const isBottom = index === 0 || (active?.groupId && project.layers[index - 1]?.groupId !== active.groupId);
 
   return (
     <aside className="layers" aria-label="Layers">
       <div className="panel-head">
         <span className="panel-title">Layers</span>
-        <button className="icon-btn sm" aria-label="Add layer" title="Add layer" onClick={props.onAdd}><I.Plus /></button>
+        <button className="icon-btn sm" aria-label="Add layer" title="Add a layer above the selected one" onClick={props.onAdd}><I.Plus /></button>
       </div>
-      <div className="layer-list">
-        {topFirst.map((layer, i) => (
-          <LayerRow key={layer.id} layer={layer} {...props} dragProps={drag.rowProps(layer.id)} dragClass={drag.rowClass(layer.id, i)} />
-        ))}
-      </div>
+      <div className="layer-list">{rows}</div>
       <div className="layer-actions">
-        <button className="icon-btn sm" aria-label="Move layer up" title="Move layer up" disabled={index >= project.layers.length - 1} onClick={() => props.onMove(activeLayerId, 1)}><I.Up /></button>
-        <button className="icon-btn sm" aria-label="Move layer down" title="Move layer down" disabled={index <= 0} onClick={() => props.onMove(activeLayerId, -1)}><I.Down /></button>
+        <button className="icon-btn sm" aria-label="Move layer up" title="Move layer up" disabled={!!group || index >= project.layers.length - 1} onClick={() => props.onMove(activeLayerId, 1)}><I.Up /></button>
+        <button className="icon-btn sm" aria-label="Move layer down" title="Move layer down" disabled={!!group || index <= 0} onClick={() => props.onMove(activeLayerId, -1)}><I.Down /></button>
+        {group ? (
+          <button className="btn small" title="Dissolve the group and keep its layers" onClick={() => props.onUngroup(group.id)}>Ungroup</button>
+        ) : active && !active.groupId ? (
+          <button className="btn small" title="Put the selected layer in a new group. Drag other layers into it, or add layers while one of its layers is selected." onClick={() => props.onGroup(active.id)}>Group</button>
+        ) : active?.groupId ? (
+          <button className="btn small" title="Take the selected layer out of its group" onClick={() => props.onDrop(active.id, 'layer', { gap: index + 1, group: null })}>Leave group</button>
+        ) : null}
         <div className="spacer" />
-        <button className="icon-btn sm" aria-label="Delete layer" title="Delete layer" disabled={project.layers.length <= 1} onClick={() => props.onRemove(activeLayerId)}><I.Trash /></button>
+        {group ? (
+          <button className="icon-btn sm" aria-label="Delete group" title="Delete the group and its layers" disabled={project.layers.every((l) => l.groupId === group.id)}
+            onClick={() => { if (window.confirm(`Delete ${group.name} and its layers?`)) props.onRemoveGroup(group.id); }}><I.Trash /></button>
+        ) : (
+          <button className="icon-btn sm" aria-label="Delete layer" title="Delete layer" disabled={project.layers.length <= 1} onClick={() => props.onRemove(activeLayerId)}><I.Trash /></button>
+        )}
       </div>
-      {active && (
+      {opacityTarget && (
         <div className="panel-section">
-          <label className="row" title="How see-through the selected layer is">
+          <div className="muted section-label">{group ? group.name : active?.name}</div>
+          <label className="row" title={`How see-through the selected ${opacityTarget.what} is`}>
             Opacity
             <input
-              type="range" min={0} max={100} value={Math.round(active.opacity * 100)}
-              onChange={(e) => props.onUpdate(active.id, { opacity: Number(e.target.value) / 100 }, false)}
-              onPointerUp={(e) => props.onUpdate(active.id, { opacity: Number((e.target as HTMLInputElement).value) / 100 }, true)}
-              onKeyUp={(e) => props.onUpdate(active.id, { opacity: Number((e.target as HTMLInputElement).value) / 100 }, true)}
+              type="range" min={0} max={100} value={Math.round(opacityTarget.value * 100)}
+              onChange={(e) => opacityTarget.set(Number(e.target.value) / 100, false)}
+              onPointerUp={(e) => opacityTarget.set(Number((e.target as HTMLInputElement).value) / 100, true)}
+              onKeyUp={(e) => opacityTarget.set(Number((e.target as HTMLInputElement).value) / 100, true)}
             />
-            <span className="value">{Math.round(active.opacity * 100)}%</span>
+            <span className="value">{Math.round(opacityTarget.value * 100)}%</span>
           </label>
+          <label className="row" title="How the colours mix with what's underneath. Multiply darkens (good for shadows), Screen and Add lighten (light and glows), Overlay adds contrast.">
+            Blend
+            <select
+              value={blend}
+              onChange={(e) => {
+                const b = e.target.value as NonNullable<Layer['blend']>;
+                if (group) props.onUpdateGroup(group.id, { blend: b });
+                else if (active) props.onUpdate(active.id, { blend: b });
+              }}
+            >
+              {BLEND_MODES.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          </label>
+          {!group && active && (
+            <label className="row" title={isBottom ? 'There is no layer below this one to clip to' : 'Clipping mask: only show this layer where the layer below it has paint. Great for shading and colour inside the lines.'}>
+              Clip to layer below
+              <input type="checkbox" disabled={!!isBottom && !active.clip} checked={!!active.clip} onChange={(e) => props.onUpdate(active.id, { clip: e.target.checked })} />
+            </label>
+          )}
         </div>
       )}
       <div className="panel-section">
@@ -109,19 +178,19 @@ export function LayersPanel(props: Props) {
   );
 }
 
-function LayerRow({ layer, project, frame, activeLayerId, onSelect, onUpdate, dragProps, dragClass }: Props & { layer: Layer; dragProps: object; dragClass: string }) {
+function LayerRow({ layer, project, frame, activeLayerId, selectedGroupId, onSelect, onSelectGroup, onUpdate, dragProps, dragClass, inGroup, groupHidden }: Props & { layer: Layer; dragProps: object; dragClass: string; inGroup: boolean; groupHidden: boolean }) {
   const [renaming, setRenaming] = useState(false);
   const drawings = layer.cels.filter((c) => c.drawingId).length;
   const length = layerLength(layer);
   const meta = `${drawings} drawing${drawings === 1 ? '' : 's'} · ${length} frame${length === 1 ? '' : 's'}`;
-  const isActive = layer.id === activeLayerId;
+  const isActive = layer.id === activeLayerId && !selectedGroupId;
 
   return (
     <div
       {...dragProps}
-      className={`layer-row${isActive ? ' active' : ''}${layer.visible ? '' : ' hidden'}${dragClass}`}
+      className={`layer-row${isActive ? ' active' : ''}${layer.visible && !groupHidden ? '' : ' hidden'}${inGroup ? ' in-group' : ''}${layer.clip ? ' clipped' : ''}${dragClass}`}
       title="Click to draw on this layer. Drag it up or down to change the stacking order."
-      onClick={() => onSelect(layer.id)}
+      onClick={() => { onSelectGroup(null); onSelect(layer.id); }}
       aria-current={isActive}
     >
       <button
@@ -147,7 +216,7 @@ function LayerRow({ layer, project, frame, activeLayerId, onSelect, onUpdate, dr
         ) : (
           <div className="layer-name" title="Double-click to rename" onDoubleClick={() => setRenaming(true)}>{layer.name}</div>
         )}
-        <div className="layer-meta">{meta}</div>
+        <div className="layer-meta">{layer.blend && layer.blend !== 'normal' ? `${BLEND_MODES.find((m) => m.id === layer.blend)?.name} · ` : ''}{meta}</div>
       </div>
       <button
         className="icon-btn sm" aria-label={layer.locked ? `Unlock ${layer.name}` : `Lock ${layer.name}`}
@@ -173,4 +242,52 @@ function Thumb({ project, layer, frame }: { project: Project; layer: Layer; fram
     if (drawing?.strokes.length) ctx.drawImage(drawingBitmap(drawing, project.width, project.height), 0, 0, w, h);
   }, [drawing, project.width, project.height]);
   return <canvas ref={ref} className="layer-thumb" width={104} height={60} aria-hidden="true" />;
+}
+
+function GroupRow({ group, selected, onSelectGroup, onUpdateGroup, dragProps, dragClass }: Props & { group: LayerGroup; selected: boolean; dragProps: object; dragClass: string }) {
+  const [renaming, setRenaming] = useState(false);
+  return (
+    <div
+      {...dragProps}
+      className={`layer-row group-row${selected ? ' active' : ''}${group.visible ? '' : ' hidden'}${dragClass}`}
+      title="Click to select the group. Drag it to move all its layers."
+      onClick={() => onSelectGroup(group.id)}
+      aria-current={selected}
+    >
+      <button
+        className="icon-btn sm" aria-label={group.collapsed ? `Open ${group.name}` : `Fold ${group.name}`}
+        title={group.collapsed ? 'Show the layers in this group' : 'Fold the group to save space'}
+        onClick={(e) => { e.stopPropagation(); onUpdateGroup(group.id, { collapsed: !group.collapsed }); }}
+      >{group.collapsed ? <I.Next /> : <I.Down />}</button>
+      <button
+        className="icon-btn sm" aria-label={group.visible ? `Hide ${group.name}` : `Show ${group.name}`}
+        title={group.visible ? 'Hide every layer in this group' : 'Show this group'}
+        onClick={(e) => { e.stopPropagation(); onUpdateGroup(group.id, { visible: !group.visible }); }}
+      >{group.visible ? <I.Eye /> : <I.EyeOff />}</button>
+      <span className="group-icon" aria-hidden="true"><I.Folder /></span>
+      <div className="layer-text">
+        {renaming ? (
+          <input
+            className="layer-rename" type="text" defaultValue={group.name} autoFocus aria-label="Group name"
+            onFocus={(e) => e.target.select()}
+            onClick={(e) => e.stopPropagation()}
+            onBlur={(e) => { onUpdateGroup(group.id, { name: e.target.value.trim() || group.name }); setRenaming(false); }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+              if (e.key === 'Escape') setRenaming(false);
+            }}
+          />
+        ) : (
+          <div className="layer-name" title="Double-click to rename" onDoubleClick={() => setRenaming(true)}>{group.name}</div>
+        )}
+        <div className="layer-meta">Group{group.blend && group.blend !== 'normal' ? ` · ${BLEND_MODES.find((m) => m.id === group.blend)?.name}` : ''}{group.opacity < 1 ? ` · ${Math.round(group.opacity * 100)}%` : ''}</div>
+      </div>
+      <button
+        className="icon-btn sm" aria-label={group.locked ? `Unlock ${group.name}` : `Lock ${group.name}`}
+        title={group.locked ? 'Unlock this group' : 'Lock every layer in this group'}
+        style={group.locked ? { color: 'var(--accent)' } : undefined}
+        onClick={(e) => { e.stopPropagation(); onUpdateGroup(group.id, { locked: !group.locked }); }}
+      >{group.locked ? <I.Lock /> : <I.Unlock />}</button>
+    </div>
+  );
 }
