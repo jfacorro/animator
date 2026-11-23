@@ -32,9 +32,26 @@ export interface Stroke {
   spans?: number[];
   /** Set when a selection was moved or scaled. */
   matrix?: Matrix;
+  /** Fills: a colour ramp instead of a flat colour. */
+  gradient?: Gradient;
+  /** Text: the words (lines split by newlines). `size` is the font size, and the two points are the box's corners. */
+  text?: string;
+  font?: FontId;
+  bold?: boolean;
 }
 
-export type StrokeKind = 'free' | 'line' | 'rect' | 'ellipse' | 'fill';
+export type StrokeKind = 'free' | 'line' | 'rect' | 'ellipse' | 'fill' | 'text';
+
+export type FontId = 'sans' | 'serif' | 'hand' | 'mono';
+
+export interface Gradient {
+  type: 'linear' | 'radial';
+  /** Start and end of the ramp in the stroke's coordinates (radial: centre and edge). */
+  from: [number, number];
+  to: [number, number];
+  /** Colour at the start and at the end (CSS colours; '#rrggbb00' is see-through). */
+  colors: [string, string];
+}
 
 export interface Drawing {
   id: string;

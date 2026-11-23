@@ -16,7 +16,7 @@ export function mirrorStroke(s: Stroke, flipX: boolean, flipY: boolean, w: numbe
 
 /** The stroke plus its mirrored copies for the symmetry mode, original first. */
 export function symmetricStrokes(s: Stroke, mode: Symmetry, w: number, h: number): Stroke[] {
-  if (mode === 'off' || s.kind === 'fill') return [s];
+  if (mode === 'off' || s.kind === 'fill' || s.kind === 'text') return [s];
   const out = [s];
   if (mode === 'x' || mode === 'xy') out.push(mirrorStroke(s, true, false, w, h));
   if (mode === 'y' || mode === 'xy') out.push(mirrorStroke(s, false, true, w, h));

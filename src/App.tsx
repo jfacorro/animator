@@ -5,6 +5,9 @@ import { DEFAULT_ONION, LayersPanel, type OnionState } from './components/Layers
 import { Splitter } from './components/Splitter';
 import { addReferenceLayer, referenceGotDrawings, type Symmetry } from './model/aids';
 import { readImageFile } from './images';
+import { actionFor, displayKey, keyOf, loadKeymap, type ActionId, type Keymap } from './keys';
+import { ShortcutsDialog } from './components/ShortcutsDialog';
+import { FONTS } from './render/render';
 import { Stage, type BrushSettings, type Tool } from './components/Stage';
 import { Timeline, type FrameAction } from './components/Timeline';
 import { commit, initHistory, redo, undo, type History } from './model/history';
@@ -28,12 +31,13 @@ const TOOLS: { id: Tool; name: string; key: string; help: string; Icon: () => Re
   { id: 'rect', name: 'Rectangle', key: 'r', help: 'draw rectangles', Icon: I.Rect },
   { id: 'ellipse', name: 'Ellipse', key: 'c', help: 'draw ellipses and circles', Icon: I.Ellipse },
   { id: 'fill', name: 'Fill', key: 'g', help: 'fill a closed area with colour', Icon: I.Bucket },
+  { id: 'text', name: 'Text', key: 't', help: 'click the canvas and type. Enter finishes, Shift+Enter starts a new line', Icon: I.Text },
   { id: 'eyedropper', name: 'Eyedropper', key: 'i', help: 'pick a colour from the canvas', Icon: I.Dropper },
   { id: 'select', name: 'Lasso select', key: 's', help: 'select strokes to move, resize, flip or delete', Icon: I.Lasso },
   { id: 'camera', name: 'Camera', key: 'k', help: 'frame the shot: pan, zoom and rotate the camera, keyed over time', Icon: I.Camera },
 ];
-const TOOL_KEYS: Record<string, Tool> = Object.fromEntries(TOOLS.map((t) => [t.key, t.id]));
-const COLOUR_TOOLS: Tool[] = ['brush', 'line', 'rect', 'ellipse', 'fill', 'eyedropper'];
+const COLOUR_TOOLS: Tool[] = ['brush', 'line', 'rect', 'ellipse', 'fill', 'text', 'eyedropper'];
+const KEYS_KEY = 'animator:keys';
 
 const DEFAULT_PALETTE = ['#1a1a1a', '#6b6f78', '#e5534b', '#f08a3a', '#f2c94c', '#6faf6a', '#5b8fd9', '#9b6fd6', '#ffffff'];
 const PALETTE_KEY = 'animator:palette';
@@ -58,6 +62,7 @@ const MAX_PALETTE = 24;
 const INK = PRESETS.find((p) => p.id === 'ink')!;
 const DEFAULT_BRUSH: BrushSettings = {
   color: '#1a1a1a', eraserSize: 24, pressure: true, fillShapes: false,
+  fillMode: 'solid', color2: '#ffffff', fadeOut: true, font: 'sans', textSize: 48, bold: false,
   size: INK.size, opacity: INK.opacity, smoothing: INK.smoothing, stabilizer: INK.stabilizer, thinning: INK.thinning, softness: INK.softness,
 };
 
@@ -142,6 +147,11 @@ export default function App() {
     }
   };
   const notifyRef = useRef<(text: string) => void>(() => {});
+  const [keymap, setKeymap] = useState<Keymap>(() => loadKeymap(loadPref<unknown>(KEYS_KEY, null, () => true)));
+  useEffect(() => { savePref(KEYS_KEY, keymap); }, [keymap]);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  /** A tool's shortcut, for tooltips: ' (B)', or nothing when it has no key. */
+  const keyHint = (id: ActionId) => (keymap[id] ? ` (${displayKey(keymap[id])})` : '');
 
   const length = P.sceneLength(project);
   const [panels, setPanels] = useState<Panels>(() => ({ ...DEFAULT_PANELS, ...loadPref<Partial<Panels>>(PANELS_KEY, {}, (v) => typeof v === 'object') }));
@@ -420,7 +430,7 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
-      if (exporting || t.closest('input, select, textarea')) return;
+      if (exporting || shortcutsOpen || t.closest('input, select, textarea')) return;
       const mod = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
       if (mod && key === 'z') { e.preventDefault(); setHistory((h) => (e.shiftKey ? redo(h) : undo(h))); return; }
@@ -446,8 +456,10 @@ export default function App() {
         });
         return;
       }
-      if (key === 'r' && e.shiftKey) { setAids((a) => ({ ...a, rulers: !a.rulers })); return; }
-      if (key === 'y') {
+      if (key === '?') { setShortcutsOpen(true); return; }
+      const action = actionFor(keymap, keyOf(e));
+      if (action === 'rulers.toggle') { setAids((a) => ({ ...a, rulers: !a.rulers })); return; }
+      if (action === 'symmetry.next') {
         setAids((a) => {
           const next = SYMMETRY[(SYMMETRY.findIndex((m) => m.id === a.symmetry) + 1) % SYMMETRY.length];
           notify(`Symmetry: ${next.name.toLowerCase()}`);
@@ -459,19 +471,19 @@ export default function App() {
         e.preventDefault();
         if (!e.repeat) { spacePanned.current = false; setSpaceHeld(true); }
       }
-      else if (key === 'arrowright' || key === '.') { e.preventDefault(); goTo(frame + 1); }
-      else if (key === 'arrowleft' || key === ',') { e.preventDefault(); goTo(frame - 1); }
+      else if (key === 'arrowright' || action === 'frame.next') { e.preventDefault(); goTo(frame + 1); }
+      else if (key === 'arrowleft' || action === 'frame.prev') { e.preventDefault(); goTo(frame - 1); }
       else if (key === 'home') goTo(0);
       else if (key === 'end') goTo(length - 1);
       else if (selection && (key === 'delete' || key === 'backspace')) { e.preventDefault(); deleteSelection(); }
       else if (tool === 'camera' && (key === 'delete' || key === 'backspace') && keyAt(project, frame)) { e.preventDefault(); apply((p) => removeCameraKey(p, frame)); }
       else if (selection && key === 'escape') setSelection(null);
-      else if (TOOL_KEYS[key]) setTool(TOOL_KEYS[key]);
-      else if (key === 'n') newDrawing();
-      else if (key === 'd') duplicate();
-      else if (key === 'o') setOnion((o) => ({ ...o, enabled: !o.enabled }));
-      else if (key === '[') setBrush((b) => (tool === 'eraser' ? { ...b, eraserSize: Math.max(2, b.eraserSize - 2) } : { ...b, size: Math.max(1, b.size - 1) }));
-      else if (key === ']') setBrush((b) => (tool === 'eraser' ? { ...b, eraserSize: Math.min(120, b.eraserSize + 2) } : { ...b, size: Math.min(60, b.size + 1) }));
+      else if (action?.startsWith('tool.')) setTool(action.slice(5) as Tool);
+      else if (action === 'frame.new') newDrawing();
+      else if (action === 'frame.duplicate') duplicate();
+      else if (action === 'onion.toggle') setOnion((o) => ({ ...o, enabled: !o.enabled }));
+      else if (action === 'brush.smaller') setBrush((b) => (tool === 'eraser' ? { ...b, eraserSize: Math.max(2, b.eraserSize - 2) } : { ...b, size: Math.max(1, b.size - 1) }));
+      else if (action === 'brush.bigger') setBrush((b) => (tool === 'eraser' ? { ...b, eraserSize: Math.min(120, b.eraserSize + 2) } : { ...b, size: Math.min(60, b.size + 1) }));
     };
     // Space plays on release, unless it was held to pan the canvas.
     const onKeyUp = (e: KeyboardEvent) => {
@@ -491,7 +503,7 @@ export default function App() {
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
     };
-  }, [exporting, frame, length, tool, togglePlay, goTo, newDrawing, duplicate, selection, deleteSelection, copyStrokes, pasteStrokes, activeLayerId, activeLayer, apply, project, notify]);
+  }, [exporting, frame, length, tool, togglePlay, goTo, newDrawing, duplicate, selection, deleteSelection, copyStrokes, pasteStrokes, activeLayerId, activeLayer, apply, project, notify, keymap, shortcutsOpen]);
 
   const newProject = () => {
     setMenuOpen(false);
@@ -604,6 +616,7 @@ export default function App() {
               <button onClick={newProject} title="Start a blank animation, replacing the current one">New animation</button>
               <button onClick={() => { setMenuOpen(false); audioInput.current?.click(); }} title="Add a sound (MP3, WAV…) to time the animation to, for example dialogue for lip-sync. It's saved inside the animation.">{project.audio ? 'Replace sound…' : 'Add sound…'}</button>
               <button onClick={() => { setMenuOpen(false); imageInput.current?.click(); }} title="Add a picture to trace over, as a see-through layer. It shows on every frame and is never exported.">Add reference image…</button>
+              <button onClick={() => { setMenuOpen(false); setShortcutsOpen(true); }} title="See and change the keyboard shortcuts (?)">Keyboard shortcuts…</button>
               <button onClick={openProject} title={canSaveToFile() ? 'Open an animation file. Changes then save back to it automatically.' : 'Open an animation saved with Save to file'}>Open from file…</button>
               {canSaveToFile() ? (
                 <>
@@ -667,7 +680,7 @@ export default function App() {
             <label title="Lines get thicker when you press harder with a pen or tablet. With a mouse it imitates pressure from drawing speed. Untick for an even line width."><input type="checkbox" checked={brush.pressure} onChange={(e) => setBrush((b) => ({ ...b, pressure: e.target.checked, thinning: e.target.checked && !b.thinning ? 0.6 : b.thinning }))} /> Pressure</label>
           </>
         )}
-        {(tool === 'brush' || tool === 'line' || tool === 'rect' || tool === 'ellipse' || tool === 'fill') && (
+        {(tool === 'brush' || tool === 'line' || tool === 'rect' || tool === 'ellipse' || tool === 'fill' || tool === 'text') && (
           <label title="How solid the colour is. Lower values let lines and colours underneath show through.">Opacity
             <input type="range" min={5} max={100} value={Math.round(brush.opacity * 100)} onChange={(e) => setBrush((b) => ({ ...b, opacity: Number(e.target.value) / 100 }))} />
             <span className="value">{pct(brush.opacity)}</span>
@@ -684,7 +697,43 @@ export default function App() {
           </label>
         )}
         {(tool === 'line' || tool === 'rect' || tool === 'ellipse') && <span className="hint">Hold Shift for {tool === 'line' ? '45° angles' : tool === 'rect' ? 'a square' : 'a circle'}</span>}
-        {tool === 'fill' && <span className="hint">Click inside a closed area of the selected layer. The fill goes under your lines.</span>}
+        {tool === 'fill' && (
+          <>
+            <label title="A flat colour, or a gradient: drag inside the area to set its direction (linear) or its size (radial)">Fill
+              <select value={brush.fillMode} onChange={(e) => setBrush((b) => ({ ...b, fillMode: e.target.value as BrushSettings['fillMode'] }))}>
+                <option value="solid">Solid</option>
+                <option value="linear">Linear gradient</option>
+                <option value="radial">Radial gradient</option>
+              </select>
+            </label>
+            {brush.fillMode !== 'solid' && (
+              <>
+                <label title="Fade the gradient out to see-through, instead of ending in a second colour"><input type="checkbox" checked={brush.fadeOut} onChange={(e) => setBrush((b) => ({ ...b, fadeOut: e.target.checked }))} /> Fade out</label>
+                {!brush.fadeOut && (
+                  <label title="The colour the gradient ends in">To
+                    <input className="color-input" type="color" aria-label="Gradient end colour" value={brush.color2} onChange={(e) => setBrush((b) => ({ ...b, color2: e.target.value }))} />
+                  </label>
+                )}
+              </>
+            )}
+            <span className="hint">{brush.fillMode === 'solid' ? 'Click inside a closed area of the selected layer. The fill goes under your lines.' : 'Drag inside a closed area from where the colour starts to where it ends. A click fills top to bottom.'}</span>
+          </>
+        )}
+        {tool === 'text' && (
+          <>
+            <label title="Typeface">Font
+              <select value={brush.font} onChange={(e) => setBrush((b) => ({ ...b, font: e.target.value as BrushSettings['font'] }))}>
+                {Object.entries(FONTS).map(([id, f]) => <option key={id} value={id} style={{ fontFamily: f.css }}>{f.name}</option>)}
+              </select>
+            </label>
+            <label title="Size of the letters in pixels">Size
+              <input type="range" min={8} max={240} value={brush.textSize} onChange={(e) => setBrush((b) => ({ ...b, textSize: Number(e.target.value) }))} />
+              <span className="value">{brush.textSize} px</span>
+            </label>
+            <label title="Bold letters"><input type="checkbox" checked={brush.bold} onChange={(e) => setBrush((b) => ({ ...b, bold: e.target.checked }))} /> Bold</label>
+            <span className="hint">Click the canvas and type. Enter finishes, Shift+Enter adds a line. Move or resize text with the Lasso.</span>
+          </>
+        )}
         {tool === 'eyedropper' && <span className="hint">Click the canvas to pick its colour. Alt+click does the same with any drawing tool.</span>}
         {tool === 'select' && activeLayer?.reference && <span className="hint">Reference image: drag it to move it, drag a corner to resize it (Shift lets the proportions change)</span>}
         {tool === 'select' && !selection && !activeLayer?.reference && <span className="hint">Draw a loop around strokes, or click one, to select them</span>}
@@ -757,7 +806,7 @@ export default function App() {
           {TOOLS.map((t) => (
             <button
               key={t.id} className={`icon-btn${tool === t.id ? ' on' : ''}`} aria-label={t.name} aria-pressed={tool === t.id}
-              title={`${t.name} (${t.key.toUpperCase()}): ${t.help}`} onClick={() => setTool(t.id)}
+              title={`${t.name}${keyHint(`tool.${t.id}` as ActionId)}: ${t.help}`} onClick={() => setTool(t.id)}
             >
               <t.Icon />
             </button>
@@ -772,7 +821,7 @@ export default function App() {
           project={project} frame={frame} activeLayerId={activeLayerId} tool={tool} brush={brush} onion={onion$}
           selection={selection} onSelectionChange={setSelection} onCommit={onCommit}
           panKey={spaceHeld} onPanned={() => { spacePanned.current = true; }} playing={playing}
-          symmetry={aids.symmetry} rulers={aids.rulers} onRulersChange={(rulers) => setAids((a) => ({ ...a, rulers }))}
+          keymap={keymap} symmetry={aids.symmetry} rulers={aids.rulers} onRulersChange={(rulers) => setAids((a) => ({ ...a, rulers }))}
           onPickColor={(color) => {
             setBrush((b) => ({ ...b, color }));
             if (tool === 'eyedropper') setTool('brush');
@@ -838,6 +887,7 @@ export default function App() {
       /></div>}
 
       {toast && <div className="toast" role="status">{toast}</div>}
+      {shortcutsOpen && <ShortcutsDialog keymap={keymap} onChange={setKeymap} onClose={() => setShortcutsOpen(false)} />}
       {exporting && <ExportDialog project={project} onClose={() => setExporting(false)} />}
     </div>
   );

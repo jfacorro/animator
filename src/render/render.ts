@@ -1,7 +1,7 @@
 import { getStroke } from 'perfect-freehand';
 import { cameraAt, cameraMatrix, hasCamera } from '../model/camera';
 import { compositeOp, sceneUnits } from '../model/groups';
-import { celIndexAt, type Drawing, type Layer, type Project, type Stroke } from '../model/project';
+import { celIndexAt, type Drawing, type FontId, type Layer, type Project, type Stroke } from '../model/project';
 
 export const PAPER = '#fbfaf7';
 export const ONION_BEFORE = '#e5534b';
@@ -68,9 +68,46 @@ function strokePath(s: Stroke, live: boolean): Path2D {
   return p;
 }
 
+export const FONTS: Record<FontId, { name: string; css: string }> = {
+  sans: { name: 'Sans', css: 'system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif' },
+  serif: { name: 'Serif', css: 'Georgia, "Times New Roman", serif' },
+  hand: { name: 'Handwritten', css: '"Segoe Print", "Comic Sans MS", "Bradley Hand", cursive' },
+  mono: { name: 'Typewriter', css: 'ui-monospace, Consolas, "Courier New", monospace' },
+};
+export const LINE_HEIGHT = 1.25;
+export const fontCss = (font: FontId | undefined, size: number, bold?: boolean) =>
+  `${bold ? 'bold ' : ''}${size}px ${FONTS[font ?? 'sans'].css}`;
+
+let measurer: CanvasRenderingContext2D | null = null;
+/** Width and height of a block of text, in px. */
+export function measureText(text: string, font: FontId | undefined, size: number, bold?: boolean): { w: number; h: number } {
+  measurer ??= makeCanvas(1, 1).getContext('2d')!;
+  measurer.font = fontCss(font, size, bold);
+  const lines = text.split('\n');
+  const w = Math.max(1, ...lines.map((l) => measurer!.measureText(l).width));
+  return { w: Math.ceil(w), h: Math.ceil(lines.length * size * LINE_HEIGHT) };
+}
+
+function fillStyleFor(ctx: CanvasRenderingContext2D, s: Stroke): string | CanvasGradient {
+  const g = s.gradient;
+  if (!g) return s.color;
+  const [fx, fy] = g.from;
+  const [tx, ty] = g.to;
+  const grad = g.type === 'radial'
+    ? ctx.createRadialGradient(fx, fy, 0, fx, fy, Math.max(1, Math.hypot(tx - fx, ty - fy)))
+    : ctx.createLinearGradient(fx, fy, tx, ty);
+  grad.addColorStop(0, g.colors[0]);
+  grad.addColorStop(1, g.colors[1]);
+  return grad;
+}
+
 /** Paint one stroke. `live` skips caching for a stroke still being drawn. */
 export function paintStroke(ctx: CanvasRenderingContext2D, s: Stroke, live = false) {
   const kind = s.kind ?? 'free';
+  if (kind === 'text') {
+    paintText(ctx, s);
+    return;
+  }
   const path = strokePath(s, live);
   ctx.save();
   if (s.matrix) ctx.transform(...s.matrix);
@@ -91,9 +128,23 @@ export function paintStroke(ctx: CanvasRenderingContext2D, s: Stroke, live = fal
     ctx.lineJoin = 'round';
     ctx.stroke(path);
   } else {
-    ctx.fillStyle = color;
+    ctx.fillStyle = s.erase ? color : fillStyleFor(ctx, s);
     ctx.fill(path);
   }
+  ctx.restore();
+}
+
+function paintText(ctx: CanvasRenderingContext2D, s: Stroke) {
+  const [a] = s.points;
+  if (!a || !s.text) return;
+  ctx.save();
+  if (s.matrix) ctx.transform(...s.matrix);
+  if (s.opacity !== undefined && s.opacity < 1) ctx.globalAlpha *= s.opacity;
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.font = fontCss(s.font, s.size, s.bold);
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = s.color;
+  s.text.split('\n').forEach((line, i) => ctx.fillText(line, a[0], a[1] + i * s.size * LINE_HEIGHT));
   ctx.restore();
 }
 

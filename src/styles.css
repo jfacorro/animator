@@ -363,3 +363,28 @@ button.file-status.paused {
 .guide-marker.y { left: 6px; height: 3px; width: 14px; margin-top: -1px; cursor: ns-resize; }
 .stage.with-rulers .stage-note { top: 32px; }
 .head-btns { display: flex; gap: 2px; }
+
+/* Text tool */
+.stage canvas.text { cursor: text; }
+.text-entry {
+  position: absolute; z-index: 2; margin: 0; padding: 0; border: 1px dashed var(--accent); background: #ffffff55;
+  outline: none; resize: none; overflow: hidden; white-space: pre; field-sizing: content; min-width: 2ch; min-height: 1lh;
+}
+.text-entry::placeholder { color: #0005; }
+
+/* Shortcuts dialog */
+.dialog.shortcuts { max-width: 860px; }
+.keys-intro { margin: 0; padding: 14px 20px 0; font-size: 13px; }
+.keys-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px 28px; padding: 12px 20px 20px; }
+.keys-grid h3 { margin: 10px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+.key-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 3px 0; font-size: 13px; }
+.key-btn, .key-row kbd {
+  min-width: 44px; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel-2);
+  color: var(--text); font: inherit; font-size: 12px; text-align: center; white-space: nowrap;
+}
+.key-btn { cursor: pointer; }
+.key-btn:hover { border-color: var(--accent); }
+.key-btn.changed { color: var(--accent); }
+.key-btn.recording { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+.key-row kbd { color: var(--muted); }
+.keys-note { margin-right: auto; font-size: 13px; color: var(--muted); }
