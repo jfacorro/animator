@@ -47,7 +47,7 @@ export function LayersPanel(props: Props) {
       </div>
       {active && (
         <div className="panel-section">
-          <label className="row">
+          <label className="row" title="How see-through the selected layer is">
             Opacity
             <input
               type="range" min={0} max={100} value={Math.round(active.opacity * 100)}
@@ -60,17 +60,17 @@ export function LayersPanel(props: Props) {
         </div>
       )}
       <div className="panel-section">
-        <label className="row">
+        <label className="row" title="Show nearby drawings faintly while you draw, to help with spacing">
           <span className="panel-title" style={{ color: 'var(--text)' }}>Onion skin</span>
           <input type="checkbox" checked={onion.enabled} onChange={(e) => props.onOnionChange({ ...onion, enabled: e.target.checked })} />
         </label>
-        <label className="row">
+        <label className="row" title="How many earlier drawings to show, in red">
           <span><i className="dot" style={{ background: 'var(--onion-before)' }} />Drawings before</span>
           <select value={onion.before} onChange={(e) => props.onOnionChange({ ...onion, before: Number(e.target.value) })}>
             {[0, 1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
         </label>
-        <label className="row">
+        <label className="row" title="How many later drawings to show, in blue">
           <span><i className="dot" style={{ background: 'var(--onion-after)' }} />Drawings after</span>
           <select value={onion.after} onChange={(e) => props.onOnionChange({ ...onion, after: Number(e.target.value) })}>
             {[0, 1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}
@@ -92,11 +92,13 @@ function LayerRow({ layer, project, frame, activeLayerId, onSelect, onUpdate }: 
   return (
     <div
       className={`layer-row${isActive ? ' active' : ''}${layer.visible ? '' : ' hidden'}`}
+      title="Click to draw on this layer"
       onClick={() => onSelect(layer.id)}
       aria-current={isActive}
     >
       <button
         className="icon-btn sm" aria-label={layer.visible ? `Hide ${layer.name}` : `Show ${layer.name}`}
+        title={layer.visible ? 'Hide this layer' : 'Show this layer'}
         onClick={(e) => { e.stopPropagation(); onUpdate(layer.id, { visible: !layer.visible }); }}
       >
         {layer.visible ? <I.Eye /> : <I.EyeOff />}
@@ -120,6 +122,7 @@ function LayerRow({ layer, project, frame, activeLayerId, onSelect, onUpdate }: 
       </div>
       <button
         className="icon-btn sm" aria-label={layer.locked ? `Unlock ${layer.name}` : `Lock ${layer.name}`}
+        title={layer.locked ? 'Unlock this layer' : 'Lock this layer so it can\'t be drawn on or edited'}
         style={layer.locked ? { color: 'var(--accent)' } : undefined}
         onClick={(e) => { e.stopPropagation(); onUpdate(layer.id, { locked: !layer.locked }); }}
       >

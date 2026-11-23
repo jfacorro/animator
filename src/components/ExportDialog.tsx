@@ -65,7 +65,7 @@ export function ExportDialog({ project, onClose }: Props) {
       <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="export-title">
         <div className="dialog-head">
           <h2 id="export-title">Export animation</h2>
-          <button className="icon-btn" aria-label="Close" onClick={onClose}><I.Close /></button>
+          <button className="icon-btn" aria-label="Close" title="Close (Esc)" onClick={onClose}><I.Close /></button>
         </div>
         <div className="dialog-body">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -80,24 +80,24 @@ export function ExportDialog({ project, onClose }: Props) {
             <div>
               <div className="muted" style={{ marginBottom: 8 }}>Format</div>
               <div className="format-grid">
-                <button className="format-option on" aria-pressed="true"><strong>GIF</strong><span>for sharing</span></button>
-                <button className="format-option" disabled><strong>MP4</strong><span>coming in a later phase</span></button>
+                <button className="format-option on" aria-pressed="true" title="Animated GIF: plays anywhere, good for sharing"><strong>GIF</strong><span>for sharing</span></button>
+                <button className="format-option" disabled title="MP4 video export is planned for a later phase"><strong>MP4</strong><span>coming in a later phase</span></button>
               </div>
             </div>
-            <label className="row">Size
+            <label className="row" title="Width × height of the exported GIF in pixels. Smaller files load faster.">Size
               <select value={scale} onChange={(e) => { setScale(Number(e.target.value)); reset(); }}>
                 {SIZES.map((s) => (
                   <option key={s} value={s}>{Math.round(project.width * s)} × {Math.round(project.height * s)}</option>
                 ))}
               </select>
             </label>
-            <label className="row">Background
+            <label className="row" title="Paper white fills the background. Transparent lets the GIF sit on any colour.">Background
               <select value={paper ? 'paper' : 'transparent'} onChange={(e) => { setPaper(e.target.value === 'paper'); reset(); }}>
                 <option value="paper">Paper white</option>
                 <option value="transparent">Transparent</option>
               </select>
             </label>
-            <label className="row" style={{ justifyContent: 'flex-start' }}>
+            <label className="row" style={{ justifyContent: 'flex-start' }} title="Also export layers you have hidden with the eye icon">
               <input type="checkbox" checked={includeHidden} onChange={(e) => { setIncludeHidden(e.target.checked); reset(); }} />
               Include hidden layers
             </label>
@@ -106,11 +106,11 @@ export function ExportDialog({ project, onClose }: Props) {
         </div>
         <div className="dialog-foot">
           {progress !== null && <div className="progress" aria-label="Export progress"><div style={{ width: `${Math.round(progress * 100)}%` }} /></div>}
-          <button className="btn" onClick={onClose}>Close</button>
+          <button className="btn" title="Close (Esc)" onClick={onClose}>Close</button>
           {result ? (
-            <button className="btn primary" onClick={() => downloadBlob(result.blob, fileName)}>Download GIF</button>
+            <button className="btn primary" title="Save the GIF to your computer" onClick={() => downloadBlob(result.blob, fileName)}>Download GIF</button>
           ) : (
-            <button className="btn primary" disabled={progress !== null} onClick={run}>{progress !== null ? 'Exporting…' : 'Export GIF'}</button>
+            <button className="btn primary" disabled={progress !== null} title="Create the GIF with these settings" onClick={run}>{progress !== null ? 'Exporting…' : 'Export GIF'}</button>
           )}
         </div>
       </div>

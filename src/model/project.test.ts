@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   addLayer,
   addStroke,
+  clearCelAt,
+  dropIndex,
+  insertDrawing,
+  moveCel,
   celIndexAt,
   celStart,
   createProject,
@@ -106,6 +110,47 @@ describe('cel editing', () => {
     p = setHoldAt(p, fg, 0, 12);
     p = holdToEnd(p, bg, 8);
     expect(p.layers[0].cels[0].hold).toBe(12);
+  });
+});
+
+describe('frame menu and dragging', () => {
+  const ids = (p: ReturnType<typeof createProject>) => p.layers[1].cels.map((c) => c.drawingId);
+
+  it('inserts a drawing before or after a cel', () => {
+    const p = createProject();
+    const id = p.layers[1].id;
+    const original = p.layers[1].cels[0].drawingId;
+    const before = insertDrawing(p, id, 1, 'before');
+    expect(before.frame).toBe(0);
+    expect(ids(before.project)[1]).toBe(original);
+    const after = insertDrawing(p, id, 1, 'after');
+    expect(after.frame).toBe(2);
+    expect(ids(after.project)[0]).toBe(original);
+  });
+
+  it('clears a drawing but keeps its cel and hold', () => {
+    const p0 = createProject();
+    const id = p0.layers[1].id;
+    const p = clearCelAt(setHoldAt(addStroke(p0, id, 0, stroke), id, 0, 3), id, 0);
+    expect(p.layers[1].cels).toEqual([{ drawingId: p0.layers[1].cels[0].drawingId, hold: 3 }]);
+    expect(drawingAt(p, p.layers[1], 0)?.strokes).toEqual([]);
+  });
+
+  it('moves a cel to a new position', () => {
+    const l = layer([2, 1, 3]);
+    const p = { ...createProject(), layers: [l] };
+    const r = moveCel(p, 'l', 0, 2);
+    expect(r.project.layers[0].cels.map((c) => c.drawingId)).toEqual(['d1', 'd2', 'd0']);
+    expect(r.frame).toBe(4);
+    expect(moveCel(p, 'l', 2, 0).project.layers[0].cels.map((c) => c.drawingId)).toEqual(['d2', 'd0', 'd1']);
+  });
+
+  it('works out where a dragged cel lands', () => {
+    const l = layer([2, 2, 2]); // frames 0-1, 2-3, 4-5
+    expect(dropIndex(l, 0, 3, 0.5)).toBe(1); // second half of cel 1: after it
+    expect(dropIndex(l, 0, 2, 0.2)).toBe(0); // first half of cel 1: before it = where it was
+    expect(dropIndex(l, 2, 0, 0.1)).toBe(0); // to the front
+    expect(dropIndex(l, 0, 9, 0.5)).toBe(2); // past the end: last
   });
 });
 
