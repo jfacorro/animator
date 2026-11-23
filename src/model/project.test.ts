@@ -20,6 +20,7 @@ import {
   isProject,
   layerLength,
   moveLayer,
+  pasteStrokes,
   removeLayer,
   sceneLength,
   setHoldAt,
@@ -214,5 +215,24 @@ describe('stroke editing', () => {
     expect(dup.indices).toEqual([2]);
     p = deleteStrokes(dup.project, id, 0, [0]);
     expect(d().strokes.map((x) => x.kind)).toEqual(['line', 'line']);
+  });
+});
+
+describe('copy and paste', () => {
+  it('pastes strokes on top of a drawing, or into an empty frame', () => {
+    let p = createProject();
+    const id = p.layers[1].id;
+    p = addStroke(p, id, 0, stroke);
+    const copied = drawingAt(p, p.layers[1], 0)!.strokes;
+    const into = pasteStrokes(p, id, 0, copied);
+    expect(into.indices).toEqual([1]);
+    expect(drawingAt(into.project, into.project.layers[1], 0)!.strokes).toHaveLength(2);
+    const empty = pasteStrokes(p, id, 4, copied);
+    expect(empty.indices).toEqual([0]);
+    expect(empty.project.layers[1].cels.map((c) => c.hold)).toEqual([2, 2, 2]);
+    // Pasted strokes are copies, not shared with the source.
+    const pasted = drawingAt(empty.project, empty.project.layers[1], 4)!.strokes[0];
+    expect(pasted).toEqual(copied[0]);
+    expect(pasted.points).not.toBe(copied[0].points);
   });
 });

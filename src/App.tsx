@@ -40,6 +40,15 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const baseRef = useRef<P.Project | null>(null);
+  /** Strokes copied with Ctrl+C or the frame menu. */
+  const [clipboard, setClipboard] = useState<P.Stroke[] | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef(0);
+  /** Space is held. Tapping it plays; holding it and dragging pans the canvas. */
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  const spacePanned = useRef(false);
+  /** Selection to keep after a paste, instead of clearing it when the drawing or tool changes. */
+  const keepSelection = useRef<number[] | null>(null);
 
   const length = P.sceneLength(project);
 
@@ -129,26 +138,6 @@ export default function App() {
     setFrame(r.frame);
   }, [apply, activeLayerId, frame, project]);
 
-  const onFrameAction = useCallback((action: FrameAction, layerId: string, f: number) => {
-    setPlaying(false);
-    setActiveLayerId(layerId);
-    if (action === 'clear') { apply((p) => P.clearCelAt(p, layerId, f)); setFrame(f); return; }
-    if (action === 'delete') {
-      const layer = project.layers.find((l) => l.id === layerId);
-      const i = layer ? P.celIndexAt(layer, f) : -1;
-      apply((p) => P.deleteCelAt(p, layerId, f));
-      // Stay on the start of the drawing that slid into this spot.
-      setFrame(layer && i >= 0 ? P.celStart(layer, i) : f);
-      return;
-    }
-    const r =
-      action === 'duplicate' ? P.duplicateCelAt(project, layerId, f)
-      : action === 'insert-left' ? P.insertDrawing(project, layerId, f, 'before')
-      : P.insertDrawing(project, layerId, f, 'after'); // insert-right, new-here
-    apply(() => r.project);
-    setFrame(r.frame);
-  }, [apply, project]);
-
   const onMoveCel = useCallback((layerId: string, from: number, to: number) => {
     const r = P.moveCel(project, layerId, from, to);
     apply(() => r.project);
@@ -163,7 +152,11 @@ export default function App() {
   const activeDrawing = activeLayer ? P.drawingAt(project, activeLayer, frame) : null;
   const activeDrawingId = activeDrawing?.id;
   const strokeCount = activeDrawing?.strokes.length ?? 0;
-  useEffect(() => { setSelection(null); }, [activeDrawingId, tool]);
+  useEffect(() => {
+    setSelection(keepSelection.current);
+    keepSelection.current = null;
+  }, [activeDrawingId, tool]);
+  useEffect(() => { keepSelection.current = null; });
   useEffect(() => {
     setSelection((sel) => (sel && sel.every((i) => i < strokeCount) ? sel : null));
   }, [strokeCount]);
@@ -190,6 +183,61 @@ export default function App() {
   }, [apply, activeLayerId, frame, selection, activeDrawing]);
 
 
+  const notify = useCallback((text: string) => {
+    setToast(text);
+    window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), 1800);
+  }, []);
+
+  /** Copy the selected strokes, or the whole drawing when nothing is selected. */
+  const copyStrokes = useCallback((layerId: string, f: number, indices: number[] | null) => {
+    const layer = project.layers.find((l) => l.id === layerId);
+    const d = layer ? P.drawingAt(project, layer, f) : null;
+    const strokes = d ? (indices ? indices.map((i) => d.strokes[i]).filter(Boolean) : d.strokes) : [];
+    if (!strokes.length) { notify('Nothing to copy here'); return false; }
+    setClipboard(strokes);
+    notify(indices ? `Copied ${strokes.length} stroke${strokes.length > 1 ? 's' : ''}` : 'Copied drawing');
+    return true;
+  }, [project, notify]);
+
+  /** Paste the clipboard on top of the drawing at a frame, then select it so it can be moved. */
+  const pasteStrokes = useCallback((layerId: string, f: number) => {
+    if (!clipboard) { notify('Copy a drawing or a selection first (Ctrl+C)'); return; }
+    const layer = project.layers.find((l) => l.id === layerId);
+    if (!layer) return;
+    if (layer.locked || !layer.visible) { notify(layer.locked ? 'This layer is locked' : 'This layer is hidden'); return; }
+    const r = P.pasteStrokes(project, layerId, f, clipboard);
+    apply(() => r.project);
+    setActiveLayerId(layerId);
+    setFrame(f);
+    keepSelection.current = r.indices;
+    setSelection(r.indices);
+    setTool('select');
+    notify('Pasted. Drag to move it.');
+  }, [apply, clipboard, project, notify]);
+
+  const onFrameAction = useCallback((action: FrameAction, layerId: string, f: number) => {
+    setPlaying(false);
+    setActiveLayerId(layerId);
+    if (action === 'copy') { copyStrokes(layerId, f, null); return; }
+    if (action === 'paste') { pasteStrokes(layerId, f); return; }
+    if (action === 'clear') { apply((p) => P.clearCelAt(p, layerId, f)); setFrame(f); return; }
+    if (action === 'delete') {
+      const layer = project.layers.find((l) => l.id === layerId);
+      const i = layer ? P.celIndexAt(layer, f) : -1;
+      apply((p) => P.deleteCelAt(p, layerId, f));
+      // Stay on the start of the drawing that slid into this spot.
+      setFrame(layer && i >= 0 ? P.celStart(layer, i) : f);
+      return;
+    }
+    const r =
+      action === 'duplicate' ? P.duplicateCelAt(project, layerId, f)
+      : action === 'insert-left' ? P.insertDrawing(project, layerId, f, 'before')
+      : P.insertDrawing(project, layerId, f, 'after'); // insert-right, new-here
+    apply(() => r.project);
+    setFrame(r.frame);
+  }, [apply, project, copyStrokes, pasteStrokes]);
+
   const onion$ = useMemo(
     () => (onion.enabled && !playing && (onion.before || onion.after) ? { layerId: activeLayerId, before: onion.before, after: onion.after } : null),
     [onion, playing, activeLayerId],
@@ -204,8 +252,23 @@ export default function App() {
       const key = e.key.toLowerCase();
       if (mod && key === 'z') { e.preventDefault(); setHistory((h) => (e.shiftKey ? redo(h) : undo(h))); return; }
       if (mod && key === 'y') { e.preventDefault(); setHistory(redo); return; }
+      if (mod && (key === 'c' || key === 'x')) {
+        if (window.getSelection()?.toString()) return;
+        e.preventDefault();
+        const sel = tool === 'select' ? selection : null;
+        if (copyStrokes(activeLayerId, frame, sel) && key === 'x') {
+          if (activeLayer?.locked) return;
+          if (sel) deleteSelection();
+          else apply((p) => P.clearCelAt(p, activeLayerId, frame));
+        }
+        return;
+      }
+      if (mod && key === 'v') { e.preventDefault(); pasteStrokes(activeLayerId, frame); return; }
       if (mod) return;
-      if (key === ' ') { e.preventDefault(); togglePlay(); }
+      if (key === ' ') {
+        e.preventDefault();
+        if (!e.repeat) { spacePanned.current = false; setSpaceHeld(true); }
+      }
       else if (key === 'arrowright' || key === '.') { e.preventDefault(); goTo(frame + 1); }
       else if (key === 'arrowleft' || key === ',') { e.preventDefault(); goTo(frame - 1); }
       else if (key === 'home') goTo(0);
@@ -219,9 +282,25 @@ export default function App() {
       else if (key === '[') setBrush((b) => (tool === 'eraser' ? { ...b, eraserSize: Math.max(2, b.eraserSize - 2) } : { ...b, size: Math.max(1, b.size - 1) }));
       else if (key === ']') setBrush((b) => (tool === 'eraser' ? { ...b, eraserSize: Math.min(120, b.eraserSize + 2) } : { ...b, size: Math.min(60, b.size + 1) }));
     };
+    // Space plays on release, unless it was held to pan the canvas.
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key !== ' ' || exporting) return;
+      e.preventDefault();
+      setSpaceHeld((held) => {
+        if (held && !spacePanned.current) togglePlay();
+        return false;
+      });
+    };
+    const onBlur = () => setSpaceHeld(false);
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [exporting, frame, length, tool, togglePlay, goTo, newDrawing, duplicate, selection, deleteSelection]);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, [exporting, frame, length, tool, togglePlay, goTo, newDrawing, duplicate, selection, deleteSelection, copyStrokes, pasteStrokes, activeLayerId, activeLayer, apply]);
 
   const newProject = () => {
     setMenuOpen(false);
@@ -259,7 +338,7 @@ export default function App() {
         <div className="transport">
           <button className="icon-btn" aria-label="First frame" title="First frame (Home)" onClick={() => goTo(0)}><I.First /></button>
           <button className="icon-btn" aria-label="Previous frame" title="Previous frame (←)" onClick={() => goTo(frame - 1)}><I.Prev /></button>
-          <button className="icon-btn play" aria-label={playing ? 'Pause' : 'Play'} title="Play / pause (Space)" onClick={togglePlay}>{playing ? <I.Pause /> : <I.Play />}</button>
+          <button className="icon-btn play" aria-label={playing ? 'Pause' : 'Play'} title="Play / pause (tap Space). Hold Space and drag to move around the canvas." onClick={togglePlay}>{playing ? <I.Pause /> : <I.Play />}</button>
           <button className="icon-btn" aria-label="Next frame" title="Next frame (→)" onClick={() => goTo(frame + 1)}><I.Next /></button>
           <button className="icon-btn" aria-label="Last frame" title="Last frame (End)" onClick={() => goTo(length - 1)}><I.Last /></button>
           <span className="frame-count">Frame <strong>{frame + 1}</strong> <span className="muted">/ {length}</span></span>
@@ -324,6 +403,7 @@ export default function App() {
             <span className="hint">{selection.length} selected · drag to move · drag a corner to resize (Shift keeps proportions)</span>
             <button className="btn small" title="Mirror the selection left to right" onClick={flipSelection}>Flip</button>
             <button className="btn small" title="Copy the selection, slightly offset" onClick={duplicateSelection}>Duplicate</button>
+            <button className="btn small" title="Copy the selection to paste it into another frame or layer (Ctrl+C, then Ctrl+V)" onClick={() => copyStrokes(activeLayerId, frame, selection)}>Copy</button>
             <button className="btn small" title="Delete the selected strokes (Delete)" onClick={deleteSelection}>Delete</button>
             <button className="btn small" title="Clear the selection (Esc)" onClick={() => setSelection(null)}>Deselect</button>
           </>
@@ -357,6 +437,7 @@ export default function App() {
         <Stage
           project={project} frame={frame} activeLayerId={activeLayerId} tool={tool} brush={brush} onion={onion$}
           selection={selection} onSelectionChange={setSelection} onCommit={onCommit}
+          panKey={spaceHeld} onPanned={() => { spacePanned.current = true; }}
           onPickColor={(color) => {
             setBrush((b) => ({ ...b, color }));
             if (tool === 'eyedropper') setTool('brush');
@@ -394,10 +475,12 @@ export default function App() {
         onDuplicate={duplicate}
         onDelete={() => apply((p) => P.deleteCelAt(p, activeLayerId, frame))}
         onFrameAction={onFrameAction}
+        canPaste={!!clipboard}
         onMoveCel={onMoveCel}
         onUpdateLayer={(id, patch) => apply((p) => P.updateLayer(p, id, patch))}
       />
 
+      {toast && <div className="toast" role="status">{toast}</div>}
       {exporting && <ExportDialog project={project} onClose={() => setExporting(false)} />}
     </div>
   );

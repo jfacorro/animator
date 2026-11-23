@@ -208,6 +208,19 @@ export function duplicateStrokes(project: Project, layerId: string, frame: numbe
 }
 
 /**
+ * Paste copies of `strokes` on top of the drawing at `frame`, creating one if
+ * the frame is empty. Returns the indices of the pasted strokes.
+ */
+export function pasteStrokes(project: Project, layerId: string, frame: number, strokes: Stroke[]): { project: Project; indices: number[] } {
+  const ensured = ensureDrawingAt(project, layerId, frame);
+  const p = ensured.project;
+  const drawing = p.drawings[ensured.drawingId];
+  const copies = strokes.map((s) => structuredClone(s));
+  const indices = copies.map((_, k) => drawing.strokes.length + k);
+  return { project: { ...p, drawings: { ...p.drawings, [drawing.id]: { ...drawing, strokes: [...drawing.strokes, ...copies] } } }, indices };
+}
+
+/**
  * Insert a new empty drawing right before or after the cel at `frame`, with
  * the same hold. Past the layer's end, the drawing starts at `frame`.
  * Returns the frame where the new drawing starts.
