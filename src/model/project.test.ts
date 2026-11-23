@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   addLayer,
   addStroke,
+  deleteStrokes,
+  duplicateStrokes,
+  transformStrokes,
   clearCelAt,
   dropIndex,
   insertDrawing,
@@ -185,3 +188,31 @@ function createProjectWith(layerId: string) {
   p.layers[1] = { ...p.layers[1], id: layerId };
   return p;
 }
+
+describe('stroke editing', () => {
+  const s = (kind: Stroke['kind'], color = '#000'): Stroke => ({ ...stroke, kind, color });
+
+  it('puts fills under the lines but above earlier fills', () => {
+    let p = createProject();
+    const id = p.layers[1].id;
+    p = addStroke(p, id, 0, s('free'));
+    p = addStroke(p, id, 0, s('fill', 'red'), true);
+    p = addStroke(p, id, 0, s('fill', 'blue'), true);
+    expect(drawingAt(p, p.layers[1], 0)!.strokes.map((x) => x.color)).toEqual(['red', 'blue', '#000']);
+  });
+
+  it('moves, duplicates and deletes selected strokes', () => {
+    let p = createProject();
+    const id = p.layers[1].id;
+    p = addStroke(addStroke(p, id, 0, s('free')), id, 0, s('line'));
+    p = transformStrokes(p, id, 0, [1], [1, 0, 0, 1, 5, 0]);
+    p = transformStrokes(p, id, 0, [1], [1, 0, 0, 1, 5, 0]);
+    const d = () => drawingAt(p, p.layers[1], 0)!;
+    expect(d().strokes[1].matrix).toEqual([1, 0, 0, 1, 10, 0]);
+    expect(d().strokes[0].matrix).toBeUndefined();
+    const dup = duplicateStrokes(p, id, 0, [1]);
+    expect(dup.indices).toEqual([2]);
+    p = deleteStrokes(dup.project, id, 0, [0]);
+    expect(d().strokes.map((x) => x.kind)).toEqual(['line', 'line']);
+  });
+});

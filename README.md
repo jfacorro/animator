@@ -28,6 +28,10 @@ npm run build    # static site in dist/
   pressure comes from the browser's Pointer Events; mouse strokes simulate it
   from speed (turn off "Pressure" for an even line). The eraser only affects
   the drawing it is used on.
+- **Tools.** Lines, rectangles and ellipses are stored as shapes; the fill
+  bucket stores the filled pixels as runs and paints them under the lines of
+  the same drawing; the lasso selects whole strokes and moves/resizes them by
+  giving each stroke a transform.
 - **Onion skin.** Previous drawings show in red, next ones in blue, on the
   selected layer.
 - **Export.** GIFs are encoded in the browser with
@@ -43,6 +47,10 @@ npm run build    # static site in dist/
 | ← / → or , / . | Previous / next frame |
 | Home / End | First / last frame |
 | B / E | Brush / eraser |
+| L / R / C | Line / rectangle / ellipse (hold Shift for 45°, square, circle) |
+| G | Fill bucket |
+| I | Eyedropper (or Alt+click with a drawing tool) |
+| S | Lasso select: drag to move, corners to resize, Delete to remove, Esc to deselect |
 | [ / ] | Smaller / bigger brush |
 | N | New drawing after the current one |
 | D | Duplicate the current drawing |

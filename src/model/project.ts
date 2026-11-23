@@ -1,4 +1,5 @@
 // The project data model and pure operations on it.
+import { multiply, type Matrix } from './geometry';
 //
 // A project is a stack of layers. Each layer holds an ordered list of cels
 // (an "exposure sheet"): every cel shows one drawing for `hold` frames, so a
@@ -18,7 +19,17 @@ export interface Stroke {
   simulatePressure: boolean;
   /** How much pressure changes the line width: 0 draws an even line. */
   thinning: number;
+  /** Freehand by default. Shapes keep two points: the drag's start and end. */
+  kind?: StrokeKind;
+  /** Rectangles and ellipses: fill instead of outline. */
+  filled?: boolean;
+  /** Paint-bucket fills: the filled pixels as [y, x0, x1, ...] runs. */
+  spans?: number[];
+  /** Set when a selection was moved or scaled. */
+  matrix?: Matrix;
 }
+
+export type StrokeKind = 'free' | 'line' | 'rect' | 'ellipse' | 'fill';
 
 export interface Drawing {
   id: string;
@@ -148,11 +159,52 @@ export function ensureDrawingAt(project: Project, layerId: string, frame: number
   return { project: { ...mapLayer(project, layerId, (l) => ({ ...l, cels })), drawings }, drawingId: d.id };
 }
 
-export function addStroke(project: Project, layerId: string, frame: number, stroke: Stroke): Project {
+/**
+ * Add a stroke on top, or with `under` (paint-bucket fills) underneath the
+ * lines but above earlier fills, like painting a cel from behind.
+ */
+export function addStroke(project: Project, layerId: string, frame: number, stroke: Stroke, under = false): Project {
   const ensured = ensureDrawingAt(project, layerId, frame);
   const p = ensured.project;
   const drawing = p.drawings[ensured.drawingId];
-  return { ...p, drawings: { ...p.drawings, [drawing.id]: { ...drawing, strokes: [...drawing.strokes, stroke] } } };
+  let strokes = [...drawing.strokes, stroke];
+  if (under) {
+    const firstLine = drawing.strokes.findIndex((s) => s.kind !== 'fill');
+    const at = firstLine < 0 ? drawing.strokes.length : firstLine;
+    strokes = [...drawing.strokes.slice(0, at), stroke, ...drawing.strokes.slice(at)];
+  }
+  return { ...p, drawings: { ...p.drawings, [drawing.id]: { ...drawing, strokes } } };
+}
+
+function editStrokes(project: Project, layerId: string, frame: number, fn: (strokes: Stroke[]) => Stroke[]): Project {
+  const layer = findLayer(project, layerId);
+  const d = drawingAt(project, layer, frame);
+  if (!d) return project;
+  return { ...project, drawings: { ...project.drawings, [d.id]: { ...d, strokes: fn(d.strokes) } } };
+}
+
+/** Move/scale the given strokes of the drawing at `frame` by `m`. */
+export function transformStrokes(project: Project, layerId: string, frame: number, indices: number[], m: Matrix): Project {
+  const set = new Set(indices);
+  return editStrokes(project, layerId, frame, (strokes) =>
+    strokes.map((s, i) => (set.has(i) ? { ...s, matrix: s.matrix ? multiply(m, s.matrix) : m } : s)),
+  );
+}
+
+export function deleteStrokes(project: Project, layerId: string, frame: number, indices: number[]): Project {
+  const set = new Set(indices);
+  return editStrokes(project, layerId, frame, (strokes) => strokes.filter((_, i) => !set.has(i)));
+}
+
+/** Copy strokes onto the top of the drawing. Returns the copies' indices. */
+export function duplicateStrokes(project: Project, layerId: string, frame: number, indices: number[]): { project: Project; indices: number[] } {
+  let out: number[] = [];
+  const next = editStrokes(project, layerId, frame, (strokes) => {
+    const copies = indices.filter((i) => strokes[i]).map((i) => ({ ...strokes[i] }));
+    out = copies.map((_, k) => strokes.length + k);
+    return [...strokes, ...copies];
+  });
+  return { project: next, indices: out };
 }
 
 /**
