@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as I from './Icons';
-import { useLayerDrag } from './useLayerDrag';
+import { layerDrops, useLayerDrag } from './useLayerDrag';
+import { groupOf } from '../model/groups';
 import { peaks, useAudioBuffer } from '../audio';
 import type { AudioTrack } from '../model/project';
 import { celIndexAt, celStart, dropIndex, dropSlot, layerLength, sceneLength, type Layer, type Project } from '../model/project';
@@ -37,7 +38,7 @@ interface Props {
   onMoveCel: (layerId: string, from: number, to: number) => void;
   onUpdateLayer: (layerId: string, patch: Partial<Pick<Layer, 'name' | 'visible' | 'locked'>>) => void;
   /** Drag a layer into a gap in the stack, counted bottom to top. */
-  onMoveLayerTo: (layerId: string, gap: number) => void;
+  onMoveLayerTo: (layerId: string, gap: number, group: string | null) => void;
 }
 
 interface Press {
@@ -74,7 +75,7 @@ export function Timeline(props: Props) {
   const [drag, setDrag] = useState<Drag | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
-  const layerDrag = useLayerDrag(project.layers.length, props.onMoveLayerTo);
+  const layerDrag = useLayerDrag((id, _kind, drop) => props.onMoveLayerTo(id, drop.gap, drop.group));
   const length = sceneLength(project);
   const audio = project.audio ?? null;
   const audioBuffer = useAudioBuffer(audio);
@@ -231,11 +232,15 @@ export function Timeline(props: Props) {
               <button className="icon-btn xs" aria-label="Remove sound" title="Remove the sound from this animation" onClick={props.onRemoveAudio}><I.Trash /></button>
             </div>
           )}
-          {topFirst.map((l, i) => (
+          {topFirst.map((l) => {
+            const index = project.layers.indexOf(l);
+            const g = groupOf(project, l);
+            const d = layerDrops(index, l.groupId);
+            return (
             <div
               key={l.id}
-              {...layerDrag.rowProps(l.id)}
-              className={`track-name${l.id === activeLayerId ? ' active' : ''}${l.visible ? '' : ' hidden'}${layerDrag.rowClass(l.id, i)}`}
+              {...layerDrag.rowProps(l.id, l.id, 'layer', d.above, d.below)}
+              className={`track-name${l.id === activeLayerId ? ' active' : ''}${l.visible && (g?.visible ?? true) ? '' : ' hidden'}${g ? ' in-group' : ''}${layerDrag.rowClass(l.id)}`}
               onClick={() => props.onSelect(l.id, frame)}
               title={`${l.name}: click to draw on this layer, double-click to rename, drag up or down to reorder`}
             >
@@ -251,7 +256,7 @@ export function Timeline(props: Props) {
                   }}
                 />
               ) : (
-                <span className="track-label" onDoubleClick={(e) => { e.stopPropagation(); setRenaming(l.id); }}>{l.name}</span>
+                <span className="track-label" title={g ? `In ${g.name}` : undefined} onDoubleClick={(e) => { e.stopPropagation(); setRenaming(l.id); }}>{l.clip && <span className="clip-mark" aria-label="clipped">↳</span>}{l.name}</span>
               )}
               <button
                 className="icon-btn xs" aria-label={l.visible ? `Hide ${l.name}` : `Show ${l.name}`}
@@ -268,7 +273,8 @@ export function Timeline(props: Props) {
                 {l.locked ? <I.Lock /> : <I.Unlock />}
               </button>
             </div>
-          ))}
+            );
+          })}
         </div>
         <div
           className="track-scroll"

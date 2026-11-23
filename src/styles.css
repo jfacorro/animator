@@ -305,3 +305,16 @@ button.file-status.paused {
 }
 .waveform canvas { display: block; }
 .waveform-loading { font-size: 11px; color: var(--muted); padding: 0 6px; line-height: 26px; }
+
+/* Layer groups, blend modes and clipping */
+.layer-row.in-group { margin-left: 18px; }
+
+.layer-row.clipped::before { content: '↳'; color: var(--muted); margin-right: -4px; }
+.group-row { background: #ffffff06; }
+.group-row .group-icon { color: var(--muted); display: flex; }
+.section-label { font-size: 12px; margin-bottom: 4px; }
+.track-name.in-group { padding-left: 21px; }
+.clip-mark { color: var(--muted); margin-right: 4px; }
+.layer-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.layer-text { min-width: 0; }
+.layer-row.in-group.clipped { margin-left: 18px; }

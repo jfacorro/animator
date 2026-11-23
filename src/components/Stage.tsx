@@ -3,6 +3,7 @@ import { scaleAbout, strokeBounds, strokesInLasso, translate, unionBoxes, apply,
 import { addStroke, drawingAt, transformStrokes, type Point, type Project, type Stroke } from '../model/project';
 import { floodFillSpans } from '../render/fill';
 import { catchUp, stabilize } from '../model/brushes';
+import { groupOf } from '../model/groups';
 import { cameraAt, cameraCorners, hasCamera, setCameraKey, type CameraView } from '../model/camera';
 import { composeFrame, paintStroke, type OnionOptions } from '../render/render';
 import { FIT_VIEW, flipAt, pinch, rotateAt, screenToLocal, snapRotation, viewTransform, zoomAt, type View } from '../model/view';
@@ -81,7 +82,10 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   const [, setOverlayTick] = useState(0);
 
   const layer = project.layers.find((l) => l.id === activeLayerId);
-  const blocked = !layer ? 'Pick a layer to draw on' : layer.locked ? 'This layer is locked' : !layer.visible ? 'This layer is hidden' : null;
+  const group = layer ? groupOf(project, layer) : null;
+  const blocked = !layer ? 'Pick a layer to draw on'
+    : layer.locked ? 'This layer is locked' : group?.locked ? 'This layer\'s group is locked'
+    : !layer.visible ? 'This layer is hidden' : group && !group.visible ? 'This layer\'s group is hidden' : null;
   const drawing = layer ? drawingAt(project, layer, frame) : null;
   const scale = display.w / project.width;
   /** Screen px per project px, including zoom. */

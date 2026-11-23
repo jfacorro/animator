@@ -1,6 +1,7 @@
 import { getStroke } from 'perfect-freehand';
 import { cameraAt, cameraMatrix, hasCamera } from '../model/camera';
-import { celIndexAt, type Drawing, type Project, type Stroke } from '../model/project';
+import { compositeOp, sceneUnits } from '../model/groups';
+import { celIndexAt, type Drawing, type Layer, type Project, type Stroke } from '../model/project';
 
 export const PAPER = '#fbfaf7';
 export const ONION_BEFORE = '#e5534b';
@@ -181,7 +182,24 @@ export interface ComposeOptions {
   camera?: boolean;
 }
 
-let scratch: HTMLCanvasElement | null = null;
+// Scratch canvases for groups and clipping, reused between frames.
+const pool: HTMLCanvasElement[] = [];
+let poolUsed = 0;
+function borrow(w: number, h: number): CanvasRenderingContext2D {
+  let c = pool[poolUsed];
+  if (!c || c.width !== w || c.height !== h) {
+    c = makeCanvas(w, h);
+    pool[poolUsed] = c;
+  }
+  poolUsed++;
+  const ctx = c.getContext('2d')!;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.clearRect(0, 0, w, h);
+  return ctx;
+}
+const giveBack = (n = 1) => { poolUsed -= n; };
 
 /** Paint one frame of the scene, bottom layer first, at project size. */
 export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, frame: number, opts: ComposeOptions) {
@@ -197,46 +215,96 @@ export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, fr
     ctx.clearRect(0, 0, w, h);
   }
   if (opts.camera && hasCamera(project)) ctx.setTransform(...cameraMatrix(cameraAt(project, frame), w, h));
+  poolUsed = 0;
 
-  for (const layer of project.layers) {
-    if (!layer.visible && !opts.includeHidden) continue;
+  const shown = (l: Layer) => l.visible || !!opts.includeHidden;
 
-    const onion = opts.onion;
-    if (onion && (onion.layerId === layer.id || (onion.layerId === null && !layer.locked))) {
-      const i = celIndexAt(layer, frame);
-      // Past the end of the layer, the previous drawings are the last ones.
-      const anchor = i >= 0 ? i : layer.cels.length;
-      const draw = (index: number, color: string, step: number, count: number) => {
-        const cel = layer.cels[index];
-        const d = cel?.drawingId ? project.drawings[cel.drawingId] : null;
-        if (!d || !d.strokes.length) return;
-        ctx.globalAlpha = (onion.opacity ?? 0.45) * (1 - (step - 1) / (count + 0.5));
-        ctx.drawImage(tintedBitmap(d, color, w, h), 0, 0);
-      };
-      for (let k = onion.before; k >= 1; k--) draw(anchor - k, onion.beforeColor ?? ONION_BEFORE, k, onion.before);
-      if (i >= 0) for (let k = onion.after; k >= 1; k--) draw(anchor + k, onion.afterColor ?? ONION_AFTER, k, onion.after);
-      ctx.globalAlpha = 1;
-    }
-
+  /** The layer's picture at this frame (with any stroke in progress), or null when empty. */
+  const picture = (layer: Layer): CanvasImageSource | null => {
     const i = celIndexAt(layer, frame);
     const id = i >= 0 ? layer.cels[i].drawingId : null;
     const d = id ? project.drawings[id] : null;
     if (opts.live && opts.live.layerId === layer.id) {
       // Base drawing plus the stroke in progress, so the eraser previews too.
-      if (!scratch || scratch.width !== w || scratch.height !== h) scratch = makeCanvas(w, h);
-      const sctx = scratch.getContext('2d')!;
-      sctx.clearRect(0, 0, w, h);
+      const sctx = borrow(w, h);
       if (d) sctx.drawImage(drawingBitmap(d, w, h), 0, 0);
       paintStroke(sctx, opts.live.stroke, true);
-      ctx.globalAlpha = layer.opacity;
-      ctx.drawImage(scratch, 0, 0);
-      ctx.globalAlpha = 1;
+      return sctx.canvas; // given back after the frame
+    }
+    return d && d.strokes.length ? drawingBitmap(d, w, h) : null;
+  };
+
+  const onionSkins = (target: CanvasRenderingContext2D, layer: Layer, locked: boolean) => {
+    const onion = opts.onion;
+    if (!onion || !(onion.layerId === layer.id || (onion.layerId === null && !locked))) return;
+    const i = celIndexAt(layer, frame);
+    // Past the end of the layer, the previous drawings are the last ones.
+    const anchor = i >= 0 ? i : layer.cels.length;
+    const draw = (index: number, color: string, step: number, count: number) => {
+      const cel = layer.cels[index];
+      const d = cel?.drawingId ? project.drawings[cel.drawingId] : null;
+      if (!d || !d.strokes.length) return;
+      target.globalAlpha = (onion.opacity ?? 0.45) * (1 - (step - 1) / (count + 0.5));
+      target.globalCompositeOperation = 'source-over';
+      target.drawImage(tintedBitmap(d, color, w, h), 0, 0);
+    };
+    for (let k = onion.before; k >= 1; k--) draw(anchor - k, onion.beforeColor ?? ONION_BEFORE, k, onion.before);
+    if (i >= 0) for (let k = onion.after; k >= 1; k--) draw(anchor + k, onion.afterColor ?? ONION_AFTER, k, onion.after);
+    target.globalAlpha = 1;
+  };
+
+  /** Draw a base layer with the layers clipped to it. */
+  const drawStack = (target: CanvasRenderingContext2D, base: Layer, clipped: Layer[], groupLocked: boolean) => {
+    if (!shown(base)) return;
+    onionSkins(target, base, base.locked || groupLocked);
+    const img = picture(base);
+    const clips = clipped.filter(shown);
+    for (const c of clips) onionSkins(target, c, c.locked || groupLocked);
+    if (!img) return;
+    let out: CanvasImageSource = img;
+    if (clips.length) {
+      const bctx = borrow(w, h);
+      bctx.drawImage(img, 0, 0);
+      for (const c of clips) {
+        const cimg = picture(c);
+        if (!cimg) continue;
+        // The clipped layer, cut to where the base has paint, then blended onto it.
+        const tctx = borrow(w, h);
+        tctx.globalAlpha = c.opacity;
+        tctx.drawImage(cimg, 0, 0);
+        tctx.globalAlpha = 1;
+        tctx.globalCompositeOperation = 'destination-in';
+        tctx.drawImage(img, 0, 0);
+        bctx.globalCompositeOperation = compositeOp(c.blend);
+        bctx.drawImage(tctx.canvas, 0, 0);
+        bctx.globalCompositeOperation = 'source-over';
+        giveBack();
+      }
+      out = bctx.canvas;
+    }
+    target.globalAlpha = base.opacity;
+    target.globalCompositeOperation = compositeOp(base.blend);
+    target.drawImage(out, 0, 0);
+    target.globalAlpha = 1;
+    target.globalCompositeOperation = 'source-over';
+  };
+
+  for (const unit of sceneUnits(project)) {
+    if (unit.kind === 'stack') {
+      drawStack(ctx, unit.base, unit.clipped, false);
       continue;
     }
-    if (!d || !d.strokes.length) continue;
-    ctx.globalAlpha = layer.opacity;
-    ctx.drawImage(drawingBitmap(d, w, h), 0, 0);
+    const g = unit.group;
+    if (!g.visible && !opts.includeHidden) continue;
+    // A group is drawn on its own, then faded and blended as one picture.
+    const gctx = borrow(w, h);
+    for (const st of unit.stacks) drawStack(gctx, st.base, st.clipped, g.locked);
+    ctx.globalAlpha = g.opacity;
+    ctx.globalCompositeOperation = compositeOp(g.blend);
+    ctx.drawImage(gctx.canvas, 0, 0);
     ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
   }
+  poolUsed = 0;
   ctx.restore();
 }

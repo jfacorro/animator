@@ -49,3 +49,4 @@ export const Camera = () => <Icon size={20}><rect x="3" y="7" width="13" height=
 export const Sound = () => <Icon size={16}><path d="M4 9v6h4l5 4V5L8 9z" /><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11" /></Icon>;
 export const Mute = () => <Icon size={16}><path d="M4 9v6h4l5 4V5L8 9z" /><path d="M17 9l5 6M22 9l-5 6" /></Icon>;
 export const Diamond = () => <Icon size={12} fill="currentColor"><path d="M12 3l9 9-9 9-9-9z" /></Icon>;
+export const Folder = () => <Icon size={16}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></Icon>;
