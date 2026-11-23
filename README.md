@@ -66,11 +66,16 @@ npm run build    # static site in dist/
   file…* (or *Open from file…*) links the animation to a file on disk, and every
   change after that also saves to that file. Elsewhere, saving downloads a copy.
 
+## Panels
+
+Drag the thin line on the edge of the tools, layers panel or timeline to resize it. Double-click the line, or use its arrow button, to hide that panel; click the strip left behind to bring it back. Sizes are remembered in this browser.
+
 ## Shortcuts
 
 | Key | Action |
 | --- | --- |
 | Space | Tap to play / pause, hold and drag to pan the canvas |
+| Tab | Hide or show the tools, layers and timeline panels |
 | ← / → or , / . | Previous / next frame |
 | Home / End | First / last frame |
 | B / E | Brush / eraser |
