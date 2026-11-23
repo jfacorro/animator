@@ -376,6 +376,21 @@ export function moveLayer(project: Project, layerId: string, delta: number): Pro
   return { ...project, layers };
 }
 
+/**
+ * Move a layer into a gap in the stack. Gaps are numbered bottom to top:
+ * 0 is below the bottom layer, layers.length is above the top one.
+ */
+export function moveLayerToGap(project: Project, layerId: string, gap: number): Project {
+  const from = project.layers.findIndex((l) => l.id === layerId);
+  if (from < 0) return project;
+  const to = Math.max(0, Math.min(project.layers.length - 1, gap > from ? gap - 1 : gap));
+  if (to === from) return project;
+  const layers = [...project.layers];
+  const [layer] = layers.splice(from, 1);
+  layers.splice(to, 0, layer);
+  return { ...project, layers };
+}
+
 /** Drop drawings no cel points at any more. */
 export function pruneDrawings(project: Project): Project {
   const used = new Set<string>();

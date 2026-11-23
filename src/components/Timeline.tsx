@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import * as I from './Icons';
+import { useLayerDrag } from './useLayerDrag';
 import { celIndexAt, celStart, dropIndex, dropSlot, layerLength, sceneLength, type Layer, type Project } from '../model/project';
 
 const FW = 26; // frame width in px
@@ -23,7 +24,9 @@ interface Props {
   /** Something has been copied and can be pasted. */
   canPaste: boolean;
   onMoveCel: (layerId: string, from: number, to: number) => void;
-  onUpdateLayer: (layerId: string, patch: Partial<Pick<Layer, 'visible' | 'locked'>>) => void;
+  onUpdateLayer: (layerId: string, patch: Partial<Pick<Layer, 'name' | 'visible' | 'locked'>>) => void;
+  /** Drag a layer into a gap in the stack, counted bottom to top. */
+  onMoveLayerTo: (layerId: string, gap: number) => void;
 }
 
 interface Press {
@@ -59,6 +62,8 @@ export function Timeline(props: Props) {
   const pressRef = useRef<Press | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const layerDrag = useLayerDrag(project.layers.length, props.onMoveLayerTo);
   const length = sceneLength(project);
   const columns = Math.max(length + 12, 48);
   const topFirst = [...project.layers].reverse();
@@ -191,14 +196,28 @@ export function Timeline(props: Props) {
       </div>
       <div className="timeline-body">
         <div className="track-names" ref={namesRef}>
-          {topFirst.map((l) => (
+          {topFirst.map((l, i) => (
             <div
               key={l.id}
-              className={`track-name${l.id === activeLayerId ? ' active' : ''}${l.visible ? '' : ' hidden'}`}
+              {...layerDrag.rowProps(l.id)}
+              className={`track-name${l.id === activeLayerId ? ' active' : ''}${l.visible ? '' : ' hidden'}${layerDrag.rowClass(l.id, i)}`}
               onClick={() => props.onSelect(l.id, frame)}
-              title={`${l.name}: click to draw on this layer`}
+              title={`${l.name}: click to draw on this layer, double-click to rename, drag up or down to reorder`}
             >
-              <span className="track-label">{l.name}</span>
+              {renaming === l.id ? (
+                <input
+                  className="track-rename" type="text" defaultValue={l.name} autoFocus aria-label="Layer name"
+                  onClick={(e) => e.stopPropagation()}
+                  onFocus={(e) => e.target.select()}
+                  onBlur={(e) => { props.onUpdateLayer(l.id, { name: e.target.value.trim() || l.name }); setRenaming(null); }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                    if (e.key === 'Escape') setRenaming(null);
+                  }}
+                />
+              ) : (
+                <span className="track-label" onDoubleClick={(e) => { e.stopPropagation(); setRenaming(l.id); }}>{l.name}</span>
+              )}
               <button
                 className="icon-btn xs" aria-label={l.visible ? `Hide ${l.name}` : `Show ${l.name}`}
                 title={l.visible ? 'Hide this layer' : 'Show this layer'}

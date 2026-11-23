@@ -20,6 +20,7 @@ import {
   isProject,
   layerLength,
   moveLayer,
+  moveLayerToGap,
   pasteStrokes,
   removeLayer,
   sceneLength,
@@ -235,4 +236,17 @@ describe('copy and paste', () => {
     expect(pasted).toEqual(copied[0]);
     expect(pasted.points).not.toBe(copied[0].points);
   });
+});
+
+it('drags a layer into a gap in the stack', () => {
+  const base = createProject();
+  const p = addLayer(addLayer(base, 'A', base.layers[1].id).project, 'B', base.layers[1].id).project;
+  const names = (q: typeof p) => q.layers.map((l) => l.name);
+  expect(names(p)).toEqual(['Background', 'Layer 1', 'B', 'A']);
+  const bg = p.layers[0].id;
+  expect(names(moveLayerToGap(p, bg, 4))).toEqual(['Layer 1', 'B', 'A', 'Background']);
+  expect(names(moveLayerToGap(p, bg, 2))).toEqual(['Layer 1', 'Background', 'B', 'A']);
+  expect(moveLayerToGap(p, bg, 1)).toBe(p); // its own gap
+  const top = p.layers[3].id;
+  expect(names(moveLayerToGap(p, top, 0))).toEqual(['A', 'Background', 'Layer 1', 'B']);
 });
