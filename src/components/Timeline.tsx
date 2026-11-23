@@ -33,6 +33,7 @@ interface Props {
   onAudioChange: (patch: Partial<AudioTrack>, record?: boolean) => void;
   onRemoveAudio: () => void;
   onAddAudio: () => void;
+  onRemoveCameraKey: (frame: number) => void;
   onMoveCel: (layerId: string, from: number, to: number) => void;
   onUpdateLayer: (layerId: string, patch: Partial<Pick<Layer, 'name' | 'visible' | 'locked'>>) => void;
   /** Drag a layer into a gap in the stack, counted bottom to top. */
@@ -299,7 +300,11 @@ export function Timeline(props: Props) {
                 {(project.camera ?? []).map((k) => (
                   <button
                     key={k.frame} className={`camera-key${k.frame === frame ? ' current' : ''}`} style={{ left: k.frame * FW + FW / 2 - 7 }}
-                    aria-label={`Camera key at frame ${k.frame + 1}`} title={`Camera key at frame ${k.frame + 1}`} onClick={() => props.onSelectFrame(k.frame)}
+                    aria-label={`Camera key at frame ${k.frame + 1}`}
+                    title={`Camera key at frame ${k.frame + 1}. Click to go to it; right-click or double-click to remove it.`}
+                    onClick={() => props.onSelectFrame(k.frame)}
+                    onDoubleClick={() => props.onRemoveCameraKey(k.frame)}
+                    onContextMenu={(e) => { e.preventDefault(); props.onRemoveCameraKey(k.frame); }}
                   ><I.Diamond /></button>
                 ))}
               </div>

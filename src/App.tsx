@@ -389,6 +389,7 @@ export default function App() {
       else if (key === 'home') goTo(0);
       else if (key === 'end') goTo(length - 1);
       else if (selection && (key === 'delete' || key === 'backspace')) { e.preventDefault(); deleteSelection(); }
+      else if (tool === 'camera' && (key === 'delete' || key === 'backspace') && keyAt(project, frame)) { e.preventDefault(); apply((p) => removeCameraKey(p, frame)); }
       else if (selection && key === 'escape') setSelection(null);
       else if (TOOL_KEYS[key]) setTool(TOOL_KEYS[key]);
       else if (key === 'n') newDrawing();
@@ -415,7 +416,7 @@ export default function App() {
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
     };
-  }, [exporting, frame, length, tool, togglePlay, goTo, newDrawing, duplicate, selection, deleteSelection, copyStrokes, pasteStrokes, activeLayerId, activeLayer, apply]);
+  }, [exporting, frame, length, tool, togglePlay, goTo, newDrawing, duplicate, selection, deleteSelection, copyStrokes, pasteStrokes, activeLayerId, activeLayer, apply, project]);
 
   const newProject = () => {
     setMenuOpen(false);
@@ -628,14 +629,14 @@ export default function App() {
                 <span className="value">{Math.round(view.rotation)}°</span>
               </label>
               {key ? (
-                <button className="btn small" title="Remove the camera key on this frame" onClick={() => apply((p) => removeCameraKey(p, frame))}>Delete key</button>
+                <button className="btn small" title="Remove the camera key on this frame (Delete)" onClick={() => apply((p) => removeCameraKey(p, frame))}>Delete key</button>
               ) : (
                 <button className="btn small" title="Keep the camera where it is at this frame, as a key" onClick={() => apply((p) => setCameraKey(p, frame, cameraAt(p, frame)))}>Add key</button>
               )}
               {hasCamera(project) && (
                 <button className="btn small" title="Remove every camera key so the whole canvas shows again" onClick={() => apply((p) => ({ ...p, camera: undefined }))}>Reset camera</button>
               )}
-              <span className="hint">Drag the blue frame to move it, a corner to zoom. Changes add a key on this frame; the camera glides between keys when you play.</span>
+              <span className="hint">Drag the blue frame to move it, a corner to zoom. Changes add a key on this frame. To remove a key: Delete here, or right-click its diamond in the timeline.</span>
             </>
           );
         })()}
@@ -727,6 +728,7 @@ export default function App() {
         onAudioChange={(patch, record = true) => apply((p) => (p.audio ? { ...p, audio: { ...p.audio, ...patch } } : p), record)}
         onRemoveAudio={() => apply((p) => ({ ...p, audio: null }))}
         onAddAudio={() => audioInput.current?.click()}
+        onRemoveCameraKey={(f) => apply((p) => removeCameraKey(p, f))}
         onMoveCel={onMoveCel}
         onUpdateLayer={(id, patch) => apply((p) => P.updateLayer(p, id, patch))}
         onMoveLayerTo={(id, gap) => apply((p) => P.moveLayerToGap(p, id, gap))}
