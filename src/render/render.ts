@@ -32,20 +32,60 @@ export function outlineToPath(points: number[][]): Path2D {
 }
 
 const pathCache = new WeakMap<Stroke, Path2D>();
-function strokePath(s: Stroke): Path2D {
+
+/** The stroke's shape in its own coordinates (before its matrix). */
+function buildPath(s: Stroke, live: boolean): Path2D {
+  const kind = s.kind ?? 'free';
+  if (kind === 'free') return outlineToPath(strokeOutline(s, !live));
+  const path = new Path2D();
+  if (kind === 'fill') {
+    const sp = s.spans ?? [];
+    for (let i = 0; i < sp.length; i += 3) path.rect(sp[i + 1], sp[i], sp[i + 2] - sp[i + 1] + 1, 1);
+    return path;
+  }
+  const [a, b] = s.points;
+  if (!a || !b) return path;
+  if (kind === 'line') {
+    path.moveTo(a[0], a[1]);
+    path.lineTo(b[0], b[1]);
+  } else if (kind === 'rect') {
+    path.rect(Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1]));
+  } else {
+    path.ellipse((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, Math.abs(b[0] - a[0]) / 2, Math.abs(b[1] - a[1]) / 2, 0, 0, Math.PI * 2);
+  }
+  return path;
+}
+
+function strokePath(s: Stroke, live: boolean): Path2D {
+  if (live) return buildPath(s, true);
   let p = pathCache.get(s);
   if (!p) {
-    p = outlineToPath(strokeOutline(s));
+    p = buildPath(s, false);
     pathCache.set(s, p);
   }
   return p;
 }
 
-export function paintStroke(ctx: CanvasRenderingContext2D, s: Stroke, path = strokePath(s)) {
+/** Paint one stroke. `live` skips caching for a stroke still being drawn. */
+export function paintStroke(ctx: CanvasRenderingContext2D, s: Stroke, live = false) {
+  const kind = s.kind ?? 'free';
+  const path = strokePath(s, live);
+  ctx.save();
+  if (s.matrix) ctx.transform(...s.matrix);
   ctx.globalCompositeOperation = s.erase ? 'destination-out' : 'source-over';
-  ctx.fillStyle = s.erase ? '#000' : s.color;
-  ctx.fill(path);
-  ctx.globalCompositeOperation = 'source-over';
+  const color = s.erase ? '#000' : s.color;
+  const outline = kind === 'line' || ((kind === 'rect' || kind === 'ellipse') && !s.filled);
+  if (outline) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = s.size;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke(path);
+  } else {
+    ctx.fillStyle = color;
+    ctx.fill(path);
+  }
+  ctx.restore();
 }
 
 function makeCanvas(w: number, h: number): HTMLCanvasElement {
@@ -123,7 +163,7 @@ export interface ComposeOptions {
   onion?: OnionOptions | null;
   includeHidden?: boolean;
   /** A stroke in progress, drawn into this layer's current drawing. */
-  live?: { layerId: string; stroke: Stroke; path: Path2D } | null;
+  live?: { layerId: string; stroke: Stroke } | null;
 }
 
 let scratch: HTMLCanvasElement | null = null;
@@ -170,7 +210,7 @@ export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, fr
       const sctx = scratch.getContext('2d')!;
       sctx.clearRect(0, 0, w, h);
       if (d) sctx.drawImage(drawingBitmap(d, w, h), 0, 0);
-      paintStroke(sctx, opts.live.stroke, opts.live.path);
+      paintStroke(sctx, opts.live.stroke, true);
       ctx.globalAlpha = layer.opacity;
       ctx.drawImage(scratch, 0, 0);
       ctx.globalAlpha = 1;

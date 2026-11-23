@@ -5,8 +5,22 @@ import { LayersPanel, type OnionState } from './components/LayersPanel';
 import { Stage, type BrushSettings, type Tool } from './components/Stage';
 import { Timeline, type FrameAction } from './components/Timeline';
 import { commit, initHistory, redo, undo, type History } from './model/history';
+import { scaleAbout, strokeBounds, translate, unionBoxes } from './model/geometry';
 import * as P from './model/project';
 import { loadCurrentProject, readProjectFile, saveCurrentProject, saveProjectFile } from './storage';
+
+const TOOLS: { id: Tool; name: string; key: string; help: string; Icon: () => React.JSX.Element }[] = [
+  { id: 'brush', name: 'Brush', key: 'b', help: 'draw freehand lines', Icon: I.Brush },
+  { id: 'eraser', name: 'Eraser', key: 'e', help: 'erase parts of the current drawing', Icon: I.Eraser },
+  { id: 'line', name: 'Line', key: 'l', help: 'draw straight lines', Icon: I.Line },
+  { id: 'rect', name: 'Rectangle', key: 'r', help: 'draw rectangles', Icon: I.Rect },
+  { id: 'ellipse', name: 'Ellipse', key: 'c', help: 'draw ellipses and circles', Icon: I.Ellipse },
+  { id: 'fill', name: 'Fill', key: 'g', help: 'fill a closed area with colour', Icon: I.Bucket },
+  { id: 'eyedropper', name: 'Eyedropper', key: 'i', help: 'pick a colour from the canvas', Icon: I.Dropper },
+  { id: 'select', name: 'Lasso select', key: 's', help: 'select strokes to move, resize, flip or delete', Icon: I.Lasso },
+];
+const TOOL_KEYS: Record<string, Tool> = Object.fromEntries(TOOLS.map((t) => [t.key, t.id]));
+const COLOUR_TOOLS: Tool[] = ['brush', 'line', 'rect', 'ellipse', 'fill', 'eyedropper'];
 
 const SWATCHES = ['#1a1a1a', '#6b6f78', '#e5534b', '#f08a3a', '#f2c94c', '#6faf6a', '#5b8fd9', '#9b6fd6', '#ffffff'];
 
@@ -17,7 +31,8 @@ export default function App() {
   const [activeLayerId, setActiveLayerId] = useState(() => history.present.layers.at(-1)!.id);
   const [frame, setFrame] = useState(0);
   const [tool, setTool] = useState<Tool>('brush');
-  const [brush, setBrush] = useState<BrushSettings>({ color: '#1a1a1a', size: 6, eraserSize: 24, smoothing: 0.5, pressure: true });
+  const [brush, setBrush] = useState<BrushSettings>({ color: '#1a1a1a', size: 6, eraserSize: 24, smoothing: 0.5, pressure: true, fillShapes: false });
+  const [selection, setSelection] = useState<number[] | null>(null);
   const [onion, setOnion] = useState<OnionState>({ enabled: true, before: 1, after: 1 });
   const [playing, setPlaying] = useState(false);
   const [loop, setLoop] = useState(true);
@@ -141,7 +156,39 @@ export default function App() {
     setFrame(r.frame);
   }, [apply, project]);
 
-  const onStroke = useCallback((stroke: P.Stroke) => apply((p) => P.addStroke(p, activeLayerId, frame, stroke)), [apply, activeLayerId, frame]);
+  const onCommit = useCallback((edit: (p: P.Project) => P.Project) => apply(edit), [apply]);
+
+  // A selection belongs to one drawing: drop it when the drawing, tool or history changes under it.
+  const activeLayer = project.layers.find((l) => l.id === activeLayerId);
+  const activeDrawing = activeLayer ? P.drawingAt(project, activeLayer, frame) : null;
+  const activeDrawingId = activeDrawing?.id;
+  const strokeCount = activeDrawing?.strokes.length ?? 0;
+  useEffect(() => { setSelection(null); }, [activeDrawingId, tool]);
+  useEffect(() => {
+    setSelection((sel) => (sel && sel.every((i) => i < strokeCount) ? sel : null));
+  }, [strokeCount]);
+
+  const deleteSelection = useCallback(() => {
+    if (!selection) return;
+    apply((p) => P.deleteStrokes(p, activeLayerId, frame, selection));
+    setSelection(null);
+  }, [apply, activeLayerId, frame, selection]);
+
+  const duplicateSelection = useCallback(() => {
+    if (!selection) return;
+    // Copies land slightly offset so they're easy to see and drag.
+    const r = P.duplicateStrokes(project, activeLayerId, frame, selection);
+    apply(() => P.transformStrokes(r.project, activeLayerId, frame, r.indices, translate(16, 16)));
+    setSelection(r.indices);
+  }, [apply, activeLayerId, frame, project, selection]);
+
+  const flipSelection = useCallback(() => {
+    if (!selection || !activeDrawing) return;
+    const box = unionBoxes(selection.map((i) => (activeDrawing.strokes[i] ? strokeBounds(activeDrawing.strokes[i]) : null)));
+    if (!box) return;
+    apply((p) => P.transformStrokes(p, activeLayerId, frame, selection, scaleAbout(-1, 1, (box.x0 + box.x1) / 2, 0)));
+  }, [apply, activeLayerId, frame, selection, activeDrawing]);
+
 
   const onion$ = useMemo(
     () => (onion.enabled && !playing && (onion.before || onion.after) ? { layerId: activeLayerId, before: onion.before, after: onion.after } : null),
@@ -163,8 +210,9 @@ export default function App() {
       else if (key === 'arrowleft' || key === ',') { e.preventDefault(); goTo(frame - 1); }
       else if (key === 'home') goTo(0);
       else if (key === 'end') goTo(length - 1);
-      else if (key === 'b') setTool('brush');
-      else if (key === 'e') setTool('eraser');
+      else if (selection && (key === 'delete' || key === 'backspace')) { e.preventDefault(); deleteSelection(); }
+      else if (selection && key === 'escape') setSelection(null);
+      else if (TOOL_KEYS[key]) setTool(TOOL_KEYS[key]);
       else if (key === 'n') newDrawing();
       else if (key === 'd') duplicate();
       else if (key === 'o') setOnion((o) => ({ ...o, enabled: !o.enabled }));
@@ -173,7 +221,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [exporting, frame, length, tool, togglePlay, goTo, newDrawing, duplicate]);
+  }, [exporting, frame, length, tool, togglePlay, goTo, newDrawing, duplicate, selection, deleteSelection]);
 
   const newProject = () => {
     setMenuOpen(false);
@@ -245,42 +293,75 @@ export default function App() {
       </header>
 
       <div className="tool-options">
-        <span className="tool-name">{isEraser ? 'Eraser' : 'Brush'}</span>
-        <label title={isEraser ? 'Width of the eraser in pixels ([ and ] to change)' : 'Width of the line in pixels ([ and ] to change)'}>Size
-          <input
-            type="range" min={1} max={isEraser ? 120 : 60} value={size}
-            onChange={(e) => setBrush((b) => (isEraser ? { ...b, eraserSize: Number(e.target.value) } : { ...b, size: Number(e.target.value) }))}
-          />
-          <span className="value">{size} px</span>
-        </label>
-        {!isEraser && (
+        <span className="tool-name">{TOOLS.find((t) => t.id === tool)?.name}</span>
+        {(tool === 'brush' || tool === 'eraser' || tool === 'line' || tool === 'rect' || tool === 'ellipse') && !(brush.fillShapes && (tool === 'rect' || tool === 'ellipse')) && (
+          <label title={isEraser ? 'Width of the eraser in pixels ([ and ] to change)' : 'Width of the line in pixels ([ and ] to change)'}>Size
+            <input
+              type="range" min={1} max={isEraser ? 120 : 60} value={size}
+              onChange={(e) => setBrush((b) => (isEraser ? { ...b, eraserSize: Number(e.target.value) } : { ...b, size: Number(e.target.value) }))}
+            />
+            <span className="value">{size} px</span>
+          </label>
+        )}
+        {tool === 'brush' && (
           <>
             <label title="Evens out shaky lines. Higher values give smoother curves but follow the pen less closely.">Smoothing
               <input type="range" min={0} max={100} value={Math.round(brush.smoothing * 100)} onChange={(e) => setBrush((b) => ({ ...b, smoothing: Number(e.target.value) / 100 }))} />
               <span className="value">{Math.round(brush.smoothing * 100)}%</span>
             </label>
             <label title="Lines get thicker when you press harder with a pen or tablet. With a mouse it imitates pressure from drawing speed. Untick for an even line width."><input type="checkbox" checked={brush.pressure} onChange={(e) => setBrush((b) => ({ ...b, pressure: e.target.checked }))} /> Pressure</label>
-            <div className="swatches" role="group" aria-label="Colour">
-              Colour
-              {SWATCHES.map((c) => (
-                <button key={c} className={`swatch${brush.color === c ? ' on' : ''}`} style={{ background: c }} aria-label={`Colour ${c}`} title="Brush colour" onClick={() => setBrush((b) => ({ ...b, color: c }))} />
-              ))}
-              <input className="color-input" type="color" aria-label="Custom colour" title="Pick any colour" value={brush.color} onChange={(e) => setBrush((b) => ({ ...b, color: e.target.value }))} />
-            </div>
           </>
+        )}
+        {(tool === 'rect' || tool === 'ellipse') && (
+          <label title="Fill the shape with colour instead of drawing its outline"><input type="checkbox" checked={brush.fillShapes} onChange={(e) => setBrush((b) => ({ ...b, fillShapes: e.target.checked }))} /> Filled</label>
+        )}
+        {(tool === 'line' || tool === 'rect' || tool === 'ellipse') && <span className="hint">Hold Shift for {tool === 'line' ? '45° angles' : tool === 'rect' ? 'a square' : 'a circle'}</span>}
+        {tool === 'fill' && <span className="hint">Click inside a closed area of the selected layer. The fill goes under your lines.</span>}
+        {tool === 'eyedropper' && <span className="hint">Click the canvas to pick its colour. Alt+click does the same with any drawing tool.</span>}
+        {tool === 'select' && !selection && <span className="hint">Draw a loop around strokes, or click one, to select them</span>}
+        {tool === 'select' && selection && (
+          <>
+            <span className="hint">{selection.length} selected · drag to move · drag a corner to resize (Shift keeps proportions)</span>
+            <button className="btn small" title="Mirror the selection left to right" onClick={flipSelection}>Flip</button>
+            <button className="btn small" title="Copy the selection, slightly offset" onClick={duplicateSelection}>Duplicate</button>
+            <button className="btn small" title="Delete the selected strokes (Delete)" onClick={deleteSelection}>Delete</button>
+            <button className="btn small" title="Clear the selection (Esc)" onClick={() => setSelection(null)}>Deselect</button>
+          </>
+        )}
+        {COLOUR_TOOLS.includes(tool) && (
+          <div className="swatches" role="group" aria-label="Colour">
+            Colour
+            {SWATCHES.map((c) => (
+              <button key={c} className={`swatch${brush.color === c ? ' on' : ''}`} style={{ background: c }} aria-label={`Colour ${c}`} title="Drawing colour" onClick={() => setBrush((b) => ({ ...b, color: c }))} />
+            ))}
+            <input className="color-input" type="color" aria-label="Custom colour" title="Pick any colour" value={brush.color} onChange={(e) => setBrush((b) => ({ ...b, color: e.target.value }))} />
+          </div>
         )}
       </div>
 
       <div className="workspace">
         <nav className="tool-rail" aria-label="Tools">
-          <button className={`icon-btn${tool === 'brush' ? ' on' : ''}`} aria-label="Brush" aria-pressed={tool === 'brush'} title="Brush (B)" onClick={() => setTool('brush')}><I.Brush /></button>
-          <button className={`icon-btn${tool === 'eraser' ? ' on' : ''}`} aria-label="Eraser" aria-pressed={tool === 'eraser'} title="Eraser (E)" onClick={() => setTool('eraser')}><I.Eraser /></button>
+          {TOOLS.map((t) => (
+            <button
+              key={t.id} className={`icon-btn${tool === t.id ? ' on' : ''}`} aria-label={t.name} aria-pressed={tool === t.id}
+              title={`${t.name} (${t.key.toUpperCase()}): ${t.help}`} onClick={() => setTool(t.id)}
+            >
+              <t.Icon />
+            </button>
+          ))}
           <div className="rail-sep" />
           <button className="icon-btn" aria-label="Undo" title="Undo (Ctrl+Z)" disabled={!history.past.length} onClick={() => setHistory(undo)}><I.Undo /></button>
           <button className="icon-btn" aria-label="Redo" title="Redo (Ctrl+Shift+Z)" disabled={!history.future.length} onClick={() => setHistory(redo)}><I.Redo /></button>
         </nav>
 
-        <Stage project={project} frame={frame} activeLayerId={activeLayerId} tool={tool} brush={brush} onion={onion$} onStroke={onStroke} />
+        <Stage
+          project={project} frame={frame} activeLayerId={activeLayerId} tool={tool} brush={brush} onion={onion$}
+          selection={selection} onSelectionChange={setSelection} onCommit={onCommit}
+          onPickColor={(color) => {
+            setBrush((b) => ({ ...b, color }));
+            if (tool === 'eyedropper') setTool('brush');
+          }}
+        />
 
         <LayersPanel
           project={project}
