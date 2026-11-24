@@ -104,6 +104,23 @@ npm run build    # static site in dist/
 
 Drag the thin line on the edge of the tools, layers panel or timeline to resize it. Double-click the line, or use its arrow button, to hide that panel; click the strip left behind to bring it back. Sizes are remembered in this browser.
 
+## iPad and Apple Pencil
+
+Open the app in Safari, then *Share → Add to Home Screen* to run it full screen
+like an app.
+
+- **Pencil draws, fingers move.** Until a pencil is used, a finger draws. Once
+  it has been, one finger pans, two fingers pinch to zoom and rotate, and a hand
+  resting on the screen while the pencil draws is ignored. Change it with
+  *Fingers* in the ⋯ menu.
+- **Two-finger tap** undoes, **three-finger tap** redoes.
+- **Press and hold** does what a right-click does: the frame menu on the
+  timeline, removing a camera key or a palette colour.
+- The brush outline follows the pencil while it hovers (iPad Pro with
+  Apple Pencil 2 or Pro).
+- Exports have a *Share…* button for saving to Photos or Files, or sending to
+  another app.
+
 ## Shortcuts
 
 These are the starting keys. *Keyboard shortcuts…* in the ⋯ menu (or ?) lists
@@ -166,8 +183,9 @@ Computer first: the standard tools of a digital 2D animation app.
 Next, in this order:
 
 1. ~~More export formats: MP4 video with sound, PNG image sequences~~ (done)
-2. **Faster with long animations and many layers** (this version)
-3. Ready for iPad and Apple Pencil
-4. Published online, so it works without a local copy
+2. ~~Faster with long animations and many layers~~ (done)
+3. **Ready for iPad and Apple Pencil** (this version)
+4. Paint layers: pixel layers for painting and real erasing, next to the stroke layers
+5. Published online, so it works without a local copy
 
 Importing photos of paper drawings is parked.

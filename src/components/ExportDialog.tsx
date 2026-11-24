@@ -21,6 +21,13 @@ const FORMATS: { id: Format; name: string; note: string; help: string }[] = [
 ];
 const EXT: Record<Format, string> = { gif: 'gif', mp4: 'mp4', png: 'zip' };
 
+/** The export as a file for the share sheet (iPad: Photos, Files, Messages…), or null where sharing files isn't supported. */
+function shareFile(blob: Blob, name: string): File | null {
+  if (typeof navigator.canShare !== 'function') return null;
+  const file = new File([blob], name, { type: blob.type });
+  return navigator.canShare({ files: [file] }) ? file : null;
+}
+
 export function ExportDialog({ project, onClose }: Props) {
   const [format, setFormat] = useState<Format>('gif');
   const [scale, setScale] = useState(0.75);
@@ -152,6 +159,11 @@ export function ExportDialog({ project, onClose }: Props) {
         <div className="dialog-foot">
           {progress !== null && <div className="progress" aria-label="Export progress"><div style={{ width: `${Math.round(progress * 100)}%` }} /></div>}
           <button className="btn" title="Close (Esc)" onClick={onClose}>Close</button>
+          {result && shareFile(result.blob, fileName) && (
+            <button className="btn" title={`Send the ${what} to another app, or save it to Photos or Files`} onClick={() => {
+              navigator.share({ files: [shareFile(result.blob, fileName)!], title: project.name }).catch(() => { /* closed the share sheet */ });
+            }}>Share…</button>
+          )}
           {result ? (
             <button className="btn primary" title={`Save the ${what} to your computer`} onClick={() => downloadBlob(result.blob, fileName)}>Download {format === 'png' ? 'zip' : format.toUpperCase()}</button>
           ) : (

@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react';
+import { useLongPress } from './longPress';
 import * as I from './Icons';
 import { layerDrops, useLayerDrag } from './useLayerDrag';
 import { groupOf } from '../model/groups';
@@ -77,6 +78,7 @@ export function Timeline(props: Props) {
   const pressRef = useRef<Press | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
+  const hold = useLongPress();
   const [renaming, setRenaming] = useState<string | null>(null);
   const layerDrag = useLayerDrag((id, _kind, drop) => props.onMoveLayerTo(id, drop.gap, drop.group));
   const length = sceneLength(project);
@@ -145,18 +147,29 @@ export function Timeline(props: Props) {
       wasCurrent: layer.id === activeLayerId && i >= 0 && i === celIndexAt(layer, frame),
     };
     e.currentTarget.setPointerCapture(e.pointerId);
+    // Press and hold (finger or pencil) opens the frame menu, like a right-click.
+    const id = e.pointerId;
+    hold.start(e, (cx, cy) => {
+      if (pressRef.current?.pointerId !== id) return;
+      pressRef.current = null;
+      props.onSelect(layer.id, f);
+      openMenu(layer.id, f, cx, cy);
+    });
   };
 
   const onTrackPointerMove = (layer: Layer, e: React.PointerEvent<HTMLDivElement>) => {
     const press = pressRef.current;
     if (!press || press.pointerId !== e.pointerId || press.layerId !== layer.id) return;
+    hold.move(e);
     const { x, frame: f, fraction } = locate(e, e.currentTarget);
     if (!drag && (press.cel < 0 || layer.locked || layer.cels.length < 2 || Math.abs(x - press.x) < DRAG_THRESHOLD)) return;
+    hold.cancel();
     setMenu(null);
     setDrag({ layerId: layer.id, from: press.cel, slot: dropSlot(layer, f, fraction), to: dropIndex(layer, press.cel, f, fraction), x });
   };
 
   const onTrackPointerUp = (layer: Layer, e: React.PointerEvent<HTMLDivElement>) => {
+    hold.cancel();
     const press = pressRef.current;
     if (!press || press.pointerId !== e.pointerId) return;
     pressRef.current = null;
@@ -171,13 +184,15 @@ export function Timeline(props: Props) {
   };
 
   const onTrackPointerCancel = () => {
+    hold.cancel();
     pressRef.current = null;
     setDrag(null);
   };
 
   const onTrackContextMenu = (layer: Layer, e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
-    if (playing) return;
+    // A long press already opened the menu (some browsers also send a context menu).
+    if (playing || hold.justFired()) return;
     const { frame: f } = locate(e, e.currentTarget);
     props.onSelect(layer.id, f);
     openMenu(layer.id, f, e.clientX, e.clientY);
@@ -296,7 +311,8 @@ export function Timeline(props: Props) {
                   <button
                     key={k.frame} className={`camera-key${k.frame === frame ? ' current' : ''}`} style={{ left: k.frame * FW + FW / 2 - 7 }}
                     aria-label={`Camera key at frame ${k.frame + 1}`}
-                    title={`Camera key at frame ${k.frame + 1}. Click to go to it; right-click or double-click to remove it.`}
+                    title={`Camera key at frame ${k.frame + 1}. Click to go to it; right-click, double-click or press and hold to remove it.`}
+                    {...hold.bind(() => props.onRemoveCameraKey(k.frame))}
                     onClick={() => props.onSelectFrame(k.frame)}
                     onDoubleClick={() => props.onRemoveCameraKey(k.frame)}
                     onContextMenu={(e) => { e.preventDefault(); props.onRemoveCameraKey(k.frame); }}
@@ -316,7 +332,7 @@ export function Timeline(props: Props) {
                 <div
                   className={`track${dragging ? ' dragging' : ''}`}
                   key={l.id}
-                  title="Click to select. Click the selected drawing again or right-click for options. Drag a drawing to move it."
+                  title="Click to select. Click the selected drawing again, right-click or press and hold for options. Drag a drawing to move it."
                   onPointerDown={(e) => onTrackPointerDown(l, e)}
                   onPointerMove={(e) => onTrackPointerMove(l, e)}
                   onPointerUp={(e) => onTrackPointerUp(l, e)}

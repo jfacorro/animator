@@ -260,7 +260,11 @@ export function drawingBox(d: Drawing, w: number, h: number): { x: number; y: nu
 // the drawing object lives. Bitmaps cover only the area a drawing touches,
 // and the cache keeps as many as fit in a memory budget, least recently used
 // going first.
-const CACHE_BYTES = 384 * 1024 * 1024;
+// Safari on iPad and iPhone stops drawing (blank canvases) once all canvases
+// together pass a few hundred MB, so it gets a much smaller budget.
+const IOS = typeof navigator !== 'undefined'
+  && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+const CACHE_BYTES = (IOS ? 128 : 384) * 1024 * 1024;
 const cache = new Map<string, Pic | null>();
 let cacheBytes = 0;
 const cacheKeys = new WeakMap<Drawing, Map<string, string>>();
@@ -272,7 +276,7 @@ const picBytes = (p: Pic | null) => (p ? p.src.width * p.src.height * 4 : 64);
 // so that drawings of about the same size can share them.
 const spare = new Map<string, HTMLCanvasElement[]>();
 let spareCount = 0;
-const SPARE_LIMIT = 48;
+const SPARE_LIMIT = IOS ? 12 : 48;
 const round64 = (v: number) => Math.ceil(v / 64) * 64;
 function bitmapCanvas(w: number, h: number): HTMLCanvasElement {
   const list = spare.get(`${w}x${h}`);
@@ -289,7 +293,12 @@ function bitmapCanvas(w: number, h: number): HTMLCanvasElement {
   return makeCanvas(w, h);
 }
 function retire(p: Pic | null) {
-  if (!p || spareCount >= SPARE_LIMIT) return;
+  if (!p) return;
+  if (spareCount >= SPARE_LIMIT) {
+    // Not kept: shrinking it hands its memory back now rather than at the next garbage collection.
+    p.src.width = p.src.height = 0;
+    return;
+  }
   const k = `${p.src.width}x${p.src.height}`;
   const list = spare.get(k) ?? [];
   list.push(p.src);
