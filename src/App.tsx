@@ -126,6 +126,8 @@ export default function App() {
   const toastTimer = useRef(0);
   /** Space is held. Tapping it plays; holding it and dragging pans the canvas. */
   const [spaceHeld, setSpaceHeld] = useState(false);
+  /** Same as spaceHeld, readable right away in key handlers. */
+  const spaceDown = useRef(false);
   const spacePanned = useRef(false);
   /** Selection to keep after a paste, instead of clearing it when the drawing or tool changes. */
   const keepSelection = useRef<number[] | null>(null);
@@ -430,7 +432,12 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
-      if (exporting || shortcutsOpen || t.closest('input, select, textarea')) return;
+      if (exporting || shortcutsOpen) return;
+      // Space still plays after clicking a button, slider or checkbox: let go of its focus
+      // so the browser doesn't also press or toggle it.
+      const textField = t.closest('textarea, select, input:not([type=range]):not([type=checkbox]):not([type=color]):not([type=radio])');
+      if (e.key === ' ' && !textField && t.closest('button, input')) t.blur();
+      else if (t.closest('input, select, textarea')) return;
       const mod = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
       if (mod && key === 'z') { e.preventDefault(); setHistory((h) => (e.shiftKey ? redo(h) : undo(h))); return; }
@@ -469,7 +476,7 @@ export default function App() {
       }
       if (key === ' ') {
         e.preventDefault();
-        if (!e.repeat) { spacePanned.current = false; setSpaceHeld(true); }
+        if (!e.repeat) { spacePanned.current = false; spaceDown.current = true; setSpaceHeld(true); }
       }
       else if (key === 'arrowright' || action === 'frame.next') { e.preventDefault(); goTo(frame + 1); }
       else if (key === 'arrowleft' || action === 'frame.prev') { e.preventDefault(); goTo(frame - 1); }
@@ -489,12 +496,13 @@ export default function App() {
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.key !== ' ' || exporting) return;
       e.preventDefault();
-      setSpaceHeld((held) => {
-        if (held && !spacePanned.current) togglePlay();
-        return false;
-      });
+      // Not inside a state updater: React may run those twice, which would play and pause at once.
+      const held = spaceDown.current;
+      spaceDown.current = false;
+      setSpaceHeld(false);
+      if (held && !spacePanned.current) togglePlay();
     };
-    const onBlur = () => setSpaceHeld(false);
+    const onBlur = () => { spaceDown.current = false; setSpaceHeld(false); };
     window.addEventListener('keydown', onKey);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('blur', onBlur);
