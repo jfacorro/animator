@@ -49,6 +49,14 @@ npm run build    # static site in dist/
   group has a blend mode (Multiply for shadows, Screen/Add for light, …), and
   *Clip to layer below* shows a layer only where the layer under it has paint
   (colour and shading inside the lines).
+- **Text.** The text tool (T) types on the canvas: click, type, Enter to
+  finish (Shift+Enter for a new line, Esc to cancel). Pick the font, size,
+  bold and colour first. Text is a stroke like any other, so the Lasso moves
+  and resizes it.
+- **Gradients.** Set the fill bucket to *Linear* or *Radial gradient* and drag
+  inside a closed area from where the colour starts to where it ends (a click
+  fills top to bottom). It runs from the current colour to the *To* colour, or
+  fades out to see-through.
 - **Drawing aids.** *Symmetry* (in the brush, eraser and shape options, or Y)
   mirrors what you draw left–right, top–bottom or both across the middle of
   the canvas; the purple dashed lines show the axes. The ruler button in the
@@ -84,6 +92,9 @@ Drag the thin line on the edge of the tools, layers panel or timeline to resize 
 
 ## Shortcuts
 
+These are the starting keys. *Keyboard shortcuts…* in the ⋯ menu (or ?) lists
+them all and lets you change them; your keys are kept in this browser.
+
 | Key | Action |
 | --- | --- |
 | Space | Tap to play / pause, hold and drag to pan the canvas |
@@ -92,7 +103,8 @@ Drag the thin line on the edge of the tools, layers panel or timeline to resize 
 | Home / End | First / last frame |
 | B / E | Brush / eraser |
 | L / R / C | Line / rectangle / ellipse (hold Shift for 45°, square, circle) |
-| G | Fill bucket |
+| G | Fill bucket (solid or gradient) |
+| T | Text |
 | I | Eyedropper (or Alt+click with a drawing tool) |
 | S | Lasso select: drag to move, corners to resize, Delete to remove, Esc to deselect |
 | K | Camera (Delete removes the key on this frame) |
@@ -135,6 +147,6 @@ Computer first: the standard tools of a digital 2D animation app.
 2. ~~Brushes: opacity, stabilizer, presets (pencil, ink, marker, soft) and a saved palette~~ (done)
 3. ~~Timing: audio track for lip-sync, camera moves, more onion skin controls~~ (done)
 4. ~~Layers: groups, blend modes, clipping masks~~ (done)
-5. Extras: ~~symmetry, rulers and guides, a reference image layer~~ (this version); text, gradients, custom shortcuts
+5. ~~Extras: symmetry, rulers and guides, a reference image layer, text, gradients, custom shortcuts~~ (done)
 
 Later: MP4 export and an installable app for iPad. Importing photos of paper drawings is parked.

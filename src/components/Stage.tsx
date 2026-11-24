@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { scaleAbout, strokeBounds, strokesInLasso, translate, unionBoxes, apply, type Box, type Matrix, type Vec } from '../model/geometry';
-import { addStroke, drawingAt, transformStrokes, type Point, type Project, type Stroke } from '../model/project';
+import { scaleAbout, spansBox, strokeBounds, strokesInLasso, translate, unionBoxes, apply, type Box, type Matrix, type Vec } from '../model/geometry';
+import { addStroke, drawingAt, transformStrokes, type FontId, type Point, type Project, type Stroke } from '../model/project';
 import { floodFillSpans } from '../render/fill';
 import { catchUp, stabilize } from '../model/brushes';
 import { groupOf } from '../model/groups';
 import { cameraAt, cameraCorners, hasCamera, setCameraKey, type CameraView } from '../model/camera';
-import { composeFrame, onImageLoad, paintStroke, type OnionOptions } from '../render/render';
+import { composeFrame, fontCss, LINE_HEIGHT, measureText, onImageLoad, paintStroke, type OnionOptions } from '../render/render';
 import { placeReference, rulerStep, snapToGuides, symmetricStrokes, type GuideAxis, type Symmetry } from '../model/aids';
 import { addGuide, moveGuide, removeGuide } from '../model/aids';
 import { FIT_VIEW, flipAt, pinch, rotateAt, screenToLocal, snapRotation, viewTransform, zoomAt, type View } from '../model/view';
 import * as I from './Icons';
+import { actionFor, displayKey, keyOf, type Keymap } from '../keys';
 
-export type Tool = 'brush' | 'eraser' | 'line' | 'rect' | 'ellipse' | 'fill' | 'eyedropper' | 'select' | 'camera';
+export type Tool = 'brush' | 'eraser' | 'line' | 'rect' | 'ellipse' | 'fill' | 'text' | 'eyedropper' | 'select' | 'camera';
 
 export interface BrushSettings {
   color: string;
@@ -29,6 +30,15 @@ export interface BrushSettings {
   softness: number;
   /** Rectangles and ellipses are filled instead of outlined. */
   fillShapes: boolean;
+  /** Fill bucket: a flat colour, or a gradient dragged across the area. */
+  fillMode: 'solid' | 'linear' | 'radial';
+  /** Gradient end colour, unless it fades out to see-through. */
+  color2: string;
+  fadeOut: boolean;
+  /** Text tool. */
+  font: FontId;
+  textSize: number;
+  bold: boolean;
 }
 
 interface Props {
@@ -50,6 +60,8 @@ interface Props {
   onPanned: () => void;
   /** During playback the scene is framed through the camera. */
   playing: boolean;
+  /** Keyboard shortcuts, for the view keys. */
+  keymap: Keymap;
   /** Mirror strokes and shapes across the canvas centre. */
   symmetry: Symmetry;
   /** Show rulers along the stage edges; guides are dragged out of them. */
@@ -67,6 +79,7 @@ type Nav =
 type Gesture =
   | { type: 'stroke'; pointerId: number; stroke: Stroke; tip: Point; pointer: Point }
   | { type: 'shape'; pointerId: number; stroke: Stroke; start: Vec }
+  | { type: 'gradient'; pointerId: number; stroke: Stroke; start: Vec; moved: boolean }
   | { type: 'lasso'; pointerId: number; points: Vec[] }
   | { type: 'move'; pointerId: number; start: Vec; matrix: Matrix }
   | { type: 'scale'; pointerId: number; origin: Vec; corner: Vec; matrix: Matrix }
@@ -84,9 +97,9 @@ function movedRect(r: { x: number; y: number; width: number; height: number }, m
   const b = apply(m, r.x + r.width, r.y + r.height);
   return { x: Math.min(a[0], b[0]), y: Math.min(a[1], b[1]), width: Math.abs(b[0] - a[0]), height: Math.abs(b[1] - a[1]) };
 }
-const EDITS: Tool[] = ['brush', 'eraser', 'line', 'rect', 'ellipse', 'fill', 'select'];
+const EDITS: Tool[] = ['brush', 'eraser', 'line', 'rect', 'ellipse', 'fill', 'text', 'select'];
 
-export function Stage({ project, frame, activeLayerId, tool, brush, onion, selection, onSelectionChange, onCommit, onPickColor, panKey, onPanned, playing, symmetry, rulers, onRulersChange }: Props) {
+export function Stage({ project, frame, activeLayerId, tool, brush, onion, selection, onSelectionChange, onCommit, onPickColor, panKey, onPanned, playing, keymap, symmetry, rulers, onRulersChange }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gestureRef = useRef<Gesture | null>(null);
@@ -103,6 +116,9 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   const [stageSize, setStageSize] = useState({ w: 800, h: 600 });
   const [guideDrag, setGuideDrag] = useState<GuideDrag | null>(null);
   const [imageTick, setImageTick] = useState(0);
+  /** Text being typed: where it goes, in project px. */
+  const [textEdit, setTextEdit] = useState<{ x: number; y: number } | null>(null);
+  const textRef = useRef<HTMLTextAreaElement>(null);
 
   const layer = project.layers.find((l) => l.id === activeLayerId);
   const group = layer ? groupOf(project, layer) : null;
@@ -149,7 +165,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       if (ref) shown = placeReference(project, activeLayerId, movedRect(ref, g.matrix));
       else if (selection) shown = transformStrokes(project, activeLayerId, frame, selection, g.matrix);
     }
-    const live = g && (g.type === 'stroke' || g.type === 'shape')
+    const live = g && (g.type === 'stroke' || g.type === 'shape' || g.type === 'gradient')
       ? { layerId: activeLayerId, strokes: symmetricStrokes(g.stroke, symmetry, project.width, project.height) } : null;
     composeFrame(ctx, shown, frame, { paper: true, onion, live, camera: playing, references: !playing });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -193,25 +209,26 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).closest('input, select, textarea, [role="dialog"]') || e.altKey) return;
+      // Ctrl/Cmd with the zoom keys also zooms here, instead of zooming the whole page.
       const mod = e.ctrlKey || e.metaKey;
-      const k = e.key.toLowerCase();
+      const a = actionFor(keymap, keyOf({ key: e.key, shiftKey: e.shiftKey, altKey: false, ctrlKey: false, metaKey: false }));
       let next: ((v: View) => View) | null = null;
-      if (k === '=' || k === '+') next = (v) => zoomAt(v, 1.25);
-      else if (k === '-' || k === '_') next = (v) => zoomAt(v, 0.8);
-      else if (k === '0') next = () => FIT_VIEW;
-      else if (k === '1') next = (v) => zoomAt(v, 1 / scale / v.zoom);
+      if (a === 'view.zoomIn') next = (v) => zoomAt(v, 1.25);
+      else if (a === 'view.zoomOut') next = (v) => zoomAt(v, 0.8);
+      else if (a === 'view.fit') next = () => FIT_VIEW;
+      else if (a === 'view.actual') next = (v) => zoomAt(v, 1 / scale / v.zoom);
       else if (mod) return;
-      else if (k === '4') next = (v) => rotateAt(v, -15);
-      else if (k === '6') next = (v) => rotateAt(v, 15);
-      else if (k === '5') next = (v) => rotateAt(v, -v.rotation);
-      else if (k === 'm') next = (v) => flipAt(v);
+      else if (a === 'view.rotateLeft') next = (v) => rotateAt(v, -15);
+      else if (a === 'view.rotateRight') next = (v) => rotateAt(v, 15);
+      else if (a === 'view.straighten') next = (v) => rotateAt(v, -v.rotation);
+      else if (a === 'view.mirror') next = (v) => flipAt(v);
       if (!next) return;
       e.preventDefault();
       setView(next);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [scale]);
+  }, [scale, keymap]);
 
   /** Stop a drawing gesture without committing it (a second finger turned it into a pinch). */
   const cancelGesture = () => {
@@ -332,7 +349,38 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     onPickColor(`#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`);
   };
 
-  const fillAt = (x: number, y: number) => {
+  /** Default gradient for a click without a drag: top to bottom of the area. */
+  const gradientFor = (spans: number[], from?: Vec, to?: Vec): Stroke['gradient'] => {
+    const b = spansBox(spans)!;
+    const cx = (b.x0 + b.x1) / 2;
+    const cy = (b.y0 + b.y1) / 2;
+    const radial = brush.fillMode === 'radial';
+    const f: Vec = from ?? (radial ? [cx, cy] : [cx, b.y0]);
+    const t: Vec = to ?? (radial ? [b.x1, cy] : [cx, b.y1]);
+    const end = brush.fadeOut ? `${brush.color.slice(0, 7)}00` : brush.color2;
+    return { type: radial ? 'radial' : 'linear', from: f, to: t, colors: [brush.color, end] };
+  };
+
+  /** The text being typed becomes a stroke. */
+  const commitText = () => {
+    const t = textEdit;
+    const el = textRef.current;
+    // Enter and the blur that follows must not add the text twice.
+    if (!el || el.dataset.done) { setTextEdit(null); return; }
+    el.dataset.done = '1';
+    const text = el.value.replace(/\s+$/, '');
+    setTextEdit(null);
+    if (!t || !text.trim()) return;
+    const { w, h } = measureText(text, brush.font, brush.textSize, brush.bold);
+    const stroke: Stroke = {
+      kind: 'text', text, font: brush.font, bold: brush.bold || undefined, points: [[t.x, t.y, 0.5], [t.x + w, t.y + h, 0.5]],
+      color: brush.color, size: brush.textSize, erase: false, smoothing: 0, simulatePressure: false, thinning: 0,
+      ...(brush.opacity < 1 ? { opacity: brush.opacity } : {}),
+    };
+    onCommit((p) => addStroke(p, activeLayerId, frame, stroke));
+  };
+
+  const fillAt = (x: number, y: number, pointerId?: number) => {
     const { width: w, height: h } = project;
     // Walls are this drawing's lines only: earlier fills can be refilled.
     const c = document.createElement('canvas');
@@ -348,7 +396,14 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     const stroke: Stroke = {
       kind: 'fill', spans, points: [[x, y, 0.5]], color: brush.color, size: 0, erase: false, smoothing: 0, simulatePressure: false, thinning: 0,
       ...(brush.opacity < 1 ? { opacity: brush.opacity } : {}),
+      ...(brush.fillMode !== 'solid' ? { gradient: gradientFor(spans) } : {}),
     };
+    if (brush.fillMode !== 'solid' && pointerId !== undefined) {
+      // Drag to set the gradient's direction and length; a click uses the default.
+      gestureRef.current = { type: 'gradient', pointerId, stroke, start: [x, y], moved: false };
+      schedulePaint();
+      return;
+    }
     onCommit((p) => addStroke(p, activeLayerId, frame, stroke, true));
   };
 
@@ -385,13 +440,21 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       flash(blocked);
       return;
     }
-    if (tool === 'fill') {
-      fillAt(x, y);
+    if (tool === 'text') {
+      // A click while typing finishes the text; the next click starts new text.
+      if (textEdit) commitText();
+      else setTextEdit({ x, y: y - brush.textSize * 0.6 });
+      e.preventDefault();
       return;
     }
 
     e.currentTarget.setPointerCapture(e.pointerId);
     const id = e.pointerId;
+
+    if (tool === 'fill') {
+      fillAt(x, y, id);
+      return;
+    }
 
     if (tool === 'select') {
       const box = selectionBox();
@@ -490,6 +553,9 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       }
       if (!e.shiftKey) [ex, ey] = snap([ex, ey]);
       g.stroke = { ...g.stroke, points: [g.stroke.points[0], [ex, ey, 0.5]] };
+    } else if (g.type === 'gradient') {
+      if (Math.hypot(x - g.start[0], y - g.start[1]) * vs > 4) g.moved = true;
+      if (g.moved) g.stroke = { ...g.stroke, gradient: gradientFor(g.stroke.spans!, g.start, [x, y]) };
     } else if (g.type === 'camera') {
       const b = g.base;
       if (g.mode === 'move') {
@@ -532,6 +598,9 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       const [a, b] = g.stroke.points;
       if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 1) onCommit((p) => addStrokes(p, g.stroke));
       else paint();
+    } else if (g.type === 'gradient') {
+      const stroke = g.stroke;
+      onCommit((p) => addStroke(p, activeLayerId, frame, stroke, true));
     } else if (g.type === 'camera') {
       const v = g.view;
       if (v !== g.base) onCommit((p) => setCameraKey(p, frame, v));
@@ -597,6 +666,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   };
   const guideHandlers = { onPointerMove: moveGuideDrag, onPointerUp: endGuideDrag, onPointerCancel: () => setGuideDrag(null) };
 
+  const kh = (id: keyof Keymap) => (keymap[id] ? displayKey(keymap[id]) : 'no key');
   const g = gestureRef.current;
   const box = tool === 'select' ? selectionBox() : null;
   const guides = project.guides;
@@ -624,7 +694,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   const camActive = tool === 'camera';
   const showBrushCursor = (tool === 'brush' || tool === 'eraser') && cursor && !blocked && !panKey && !navigating;
   const cursorSize = (tool === 'eraser' ? brush.eraserSize : brush.size) * scale;
-  const canvasClass = tool === 'camera' ? 'camera' : tool === 'eyedropper' ? 'pick' : blocked && EDITS.includes(tool) ? 'blocked' : tool === 'fill' ? 'fill' : tool === 'select' ? 'select' : 'draw';
+  const canvasClass = tool === 'camera' ? 'camera' : tool === 'eyedropper' ? 'pick' : blocked && EDITS.includes(tool) ? 'blocked' : tool === 'fill' ? 'fill' : tool === 'text' ? 'text' : tool === 'select' ? 'select' : 'draw';
   const hs = 10 / vs; // handle size in project px
 
   return (
@@ -688,6 +758,13 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
                 <circle cx={g.pointer[0]} cy={g.pointer[1]} r={3 / vs} fill="#f0a43a" />
               </g>
             )}
+            {g?.type === 'gradient' && g.moved && g.stroke.gradient && (
+              <g>
+                <line x1={g.stroke.gradient.from[0]} y1={g.stroke.gradient.from[1]} x2={g.stroke.gradient.to[0]} y2={g.stroke.gradient.to[1]} stroke="#f0a43a" strokeWidth={1.5 / vs} />
+                <circle cx={g.stroke.gradient.from[0]} cy={g.stroke.gradient.from[1]} r={4 / vs} fill="#fff" stroke="#f0a43a" strokeWidth={1.5 / vs} />
+                <circle cx={g.stroke.gradient.to[0]} cy={g.stroke.gradient.to[1]} r={4 / vs} fill="#f0a43a" />
+              </g>
+            )}
             {g?.type === 'lasso' && (
               <polyline points={g.points.map((p) => p.join(',')).join(' ')} fill="rgba(240,164,58,0.08)" stroke="#f0a43a" strokeWidth={1.5 / vs} strokeDasharray={`${5 / vs} ${4 / vs}`} />
             )}
@@ -701,6 +778,23 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
             )}
           </svg>
         )}
+        {textEdit && (
+          <textarea
+            ref={textRef} className="text-entry" autoFocus rows={1} spellCheck={false} aria-label="Text"
+            placeholder="Type, then Enter"
+            style={{
+              left: textEdit.x * scale, top: textEdit.y * scale, color: brush.color, opacity: brush.opacity,
+              font: fontCss(brush.font, brush.textSize * scale, brush.bold), lineHeight: LINE_HEIGHT,
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commitText(); }
+              if (e.key === 'Escape') setTextEdit(null);
+            }}
+            onBlur={commitText}
+          />
+        )}
         {showBrushCursor && cursorSize > 4 && (
           <div
             className="brush-cursor"
@@ -712,7 +806,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
         <>
           <div
             className={`stage-ruler top${straight ? '' : ' off'}`} {...guideHandlers}
-            title={straight ? 'Drag down onto the canvas to add a guide. Drag a guide back here to remove it.' : 'Straighten the view (5) to read the rulers. You can still drag guides out.'}
+            title={straight ? 'Drag down onto the canvas to add a guide. Drag a guide back here to remove it.' : `Straighten the view (${kh('view.straighten')}) to read the rulers. You can still drag guides out.`}
             onPointerDown={(e) => startGuide(e, 'y', null)}
           >
             {straight && (
@@ -734,7 +828,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
           </div>
           <div
             className={`stage-ruler left${straight ? '' : ' off'}`} {...guideHandlers}
-            title={straight ? 'Drag right onto the canvas to add a guide. Drag a guide back here to remove it.' : 'Straighten the view (5) to read the rulers. You can still drag guides out.'}
+            title={straight ? 'Drag right onto the canvas to add a guide. Drag a guide back here to remove it.' : `Straighten the view (${kh('view.straighten')}) to read the rulers. You can still drag guides out.`}
             onPointerDown={(e) => startGuide(e, 'x', null)}
           >
             {straight && (
@@ -754,24 +848,24 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
               />
             ))}
           </div>
-          <div className="ruler-corner" title="Hide the rulers (Shift+R)" onClick={() => onRulersChange(false)}>×</div>
+          <div className="ruler-corner" title={`Hide the rulers (${kh('rulers.toggle')})`} onClick={() => onRulersChange(false)}>×</div>
         </>
       )}
       {note && <div className="stage-note" role="status">{note}</div>}
       <div className="view-controls" role="group" aria-label="View">
-        <button className="icon-btn" aria-label="Zoom out" title="Zoom out (−, or scroll the mouse wheel)" onClick={() => setView((v) => zoomAt(v, 0.8))}><I.Minus /></button>
-        <button className="zoom-value" title="Zoom level. Click for actual size, 1 pixel per pixel (1)" onClick={() => setView((v) => zoomAt(v, 1 / scale / v.zoom))}>{Math.round(vs * 100)}%</button>
-        <button className="icon-btn" aria-label="Zoom in" title="Zoom in (+, or scroll the mouse wheel)" onClick={() => setView((v) => zoomAt(v, 1.25))}><I.Plus /></button>
+        <button className="icon-btn" aria-label="Zoom out" title={`Zoom out (${kh('view.zoomOut')}, or scroll the mouse wheel)`} onClick={() => setView((v) => zoomAt(v, 0.8))}><I.Minus /></button>
+        <button className="zoom-value" title={`Zoom level. Click for actual size, 1 pixel per pixel (${kh('view.actual')})`} onClick={() => setView((v) => zoomAt(v, 1 / scale / v.zoom))}>{Math.round(vs * 100)}%</button>
+        <button className="icon-btn" aria-label="Zoom in" title={`Zoom in (${kh('view.zoomIn')}, or scroll the mouse wheel)`} onClick={() => setView((v) => zoomAt(v, 1.25))}><I.Plus /></button>
         <span className="sep" />
-        <button className="icon-btn" aria-label="Rotate left" title="Rotate the view 15° left (4). On a touch screen, twist two fingers." onClick={() => setView((v) => rotateAt(v, -15))}><I.RotateLeft /></button>
+        <button className="icon-btn" aria-label="Rotate left" title={`Rotate the view 15° left (${kh('view.rotateLeft')}). On a touch screen, twist two fingers.`} onClick={() => setView((v) => rotateAt(v, -15))}><I.RotateLeft /></button>
         {view.rotation !== 0 && (
-          <button className="zoom-value" title="Rotation of the view. Click to straighten it (5)" onClick={() => setView((v) => rotateAt(v, -v.rotation))}>{Math.round(view.rotation)}°</button>
+          <button className="zoom-value" title={`Rotation of the view. Click to straighten it (${kh('view.straighten')})`} onClick={() => setView((v) => rotateAt(v, -v.rotation))}>{Math.round(view.rotation)}°</button>
         )}
-        <button className="icon-btn" aria-label="Rotate right" title="Rotate the view 15° right (6)" onClick={() => setView((v) => rotateAt(v, 15))}><I.RotateRight /></button>
-        <button className={`icon-btn${view.flip ? ' on' : ''}`} aria-label="Mirror view" aria-pressed={view.flip} title="Mirror the view left to right to check your drawing with fresh eyes (M). The drawing itself doesn't change." onClick={() => setView((v) => flipAt(v))}><I.Mirror /></button>
-        <button className={`icon-btn${rulers ? ' on' : ''}`} aria-label="Rulers and guides" aria-pressed={rulers} title="Show rulers to drag guides out of (Shift+R). Shapes snap to guides." onClick={() => onRulersChange(!rulers)}><I.Ruler /></button>
+        <button className="icon-btn" aria-label="Rotate right" title={`Rotate the view 15° right (${kh('view.rotateRight')})`} onClick={() => setView((v) => rotateAt(v, 15))}><I.RotateRight /></button>
+        <button className={`icon-btn${view.flip ? ' on' : ''}`} aria-label="Mirror view" aria-pressed={view.flip} title={`Mirror the view left to right to check your drawing with fresh eyes (${kh('view.mirror')}). The drawing itself doesn't change.`} onClick={() => setView((v) => flipAt(v))}><I.Mirror /></button>
+        <button className={`icon-btn${rulers ? ' on' : ''}`} aria-label="Rulers and guides" aria-pressed={rulers} title={`Show rulers to drag guides out of (${kh('rulers.toggle')}). Shapes snap to guides.`} onClick={() => onRulersChange(!rulers)}><I.Ruler /></button>
         <span className="sep" />
-        <button className="btn small" title="Fit the whole canvas on screen and straighten it (0). Pan with Space+drag, the middle mouse button or two fingers." onClick={() => setView(FIT_VIEW)}>Fit</button>
+        <button className="btn small" title={`Fit the whole canvas on screen and straighten it (${kh('view.fit')}). Pan with Space+drag, the middle mouse button or two fingers.`} onClick={() => setView(FIT_VIEW)}>Fit</button>
       </div>
     </div>
   );

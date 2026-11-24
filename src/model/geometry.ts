@@ -59,6 +59,10 @@ export function samplePoints(s: Stroke): Vec[] {
   if (kind === 'fill') {
     const b = spansBox(s.spans ?? []);
     local = b ? [[b.x0, b.y0], [b.x1, b.y0], [b.x1, b.y1], [b.x0, b.y1], [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2]] : [];
+  } else if (kind === 'text') {
+    const [a, b] = s.points;
+    if (!a || !b) return [];
+    local = [[a[0], a[1]], [b[0], a[1]], [b[0], b[1]], [a[0], b[1]], [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]];
   } else if (kind === 'free') {
     const step = Math.max(1, Math.floor(s.points.length / 48));
     local = s.points.filter((_, i) => i % step === 0).map((p) => [p[0], p[1]] as Vec);
@@ -80,7 +84,7 @@ export function strokeBounds(s: Stroke): Box | null {
   const pts = samplePoints(s);
   if (!pts.length) return null;
   const scale = s.matrix ? Math.sqrt(Math.abs(s.matrix[0] * s.matrix[3] - s.matrix[1] * s.matrix[2])) : 1;
-  const pad = (s.kind === 'fill' ? 0 : s.size / 2) * scale;
+  const pad = (s.kind === 'fill' || s.kind === 'text' ? 0 : s.size / 2) * scale;
   const xs = pts.map((p) => p[0]);
   const ys = pts.map((p) => p[1]);
   return { x0: Math.min(...xs) - pad, y0: Math.min(...ys) - pad, x1: Math.max(...xs) + pad, y1: Math.max(...ys) + pad };
