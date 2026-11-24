@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { scaleAbout, spansBox, strokeBounds, strokesInLasso, translate, unionBoxes, apply, type Box, type Matrix, type Vec } from '../model/geometry';
-import { addStroke, drawingAt, transformStrokes, type FontId, type Point, type Project, type Stroke } from '../model/project';
+import { addStroke, celIndexAt, drawingAt, transformStrokes, type FontId, type Point, type Project, type Stroke } from '../model/project';
 import { floodFillSpans } from '../render/fill';
 import { catchUp, stabilize } from '../model/brushes';
 import { groupOf } from '../model/groups';
@@ -89,6 +89,17 @@ type Gesture =
 interface GuideDrag { pointerId: number; axis: GuideAxis; index: number | null; pos: number; onRuler: boolean }
 
 const SHAPES: Tool[] = ['line', 'rect', 'ellipse'];
+
+/** What a frame shows, in short: each layer's drawing there, and the camera while playing. */
+function frameSignature(project: Project, frame: number, playing: boolean): string {
+  let sig = '';
+  for (const l of project.layers) {
+    const i = celIndexAt(l, frame);
+    sig += `${i >= 0 ? l.cels[i].drawingId : '-'}|`;
+  }
+  if (playing && hasCamera(project)) sig += JSON.stringify(cameraAt(project, frame));
+  return sig;
+}
 const MIRRORED: Tool[] = ['brush', 'eraser', 'line', 'rect', 'ellipse'];
 
 /** A rectangle after a move/scale matrix. */
@@ -155,6 +166,13 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     return () => ro.disconnect();
   }, [project.width, project.height]);
 
+  // True when the last change to what's painted was only the frame number.
+  const otherDeps = [project, onion, activeLayerId, selection, playing, symmetry, imageTick];
+  const prevDeps = useRef(otherDeps);
+  const sameExceptFrame = useRef(false);
+  sameExceptFrame.current = otherDeps.every((d, i) => d === prevDeps.current[i]);
+  prevDeps.current = otherDeps;
+
   const paint = useCallback(() => {
     const ctx = canvasRef.current?.getContext('2d');
     if (!ctx) return;
@@ -174,9 +192,16 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   // Repaint when a reference image finishes loading.
   useEffect(() => onImageLoad(() => setImageTick((t) => t + 1)), []);
 
+  // Repaint when something shown changes. Stepping onto a frame that shows the
+  // same drawings (a held drawing, or animation on twos) needs no repaint.
+  const lastPaint = useRef<{ paint: typeof paint; sig: string; frame: number } | null>(null);
   useEffect(() => {
+    const sig = frameSignature(project, frame, playing);
+    const last = lastPaint.current;
+    lastPaint.current = { paint, sig, frame };
+    if (last && last.frame !== frame && last.sig === sig && !gestureRef.current && sameExceptFrame.current) return;
     paint();
-  }, [paint]);
+  }, [paint, project, frame, playing]);
 
   useEffect(() => () => cancelAnimationFrame(rafRef.current), []);
 

@@ -864,6 +864,7 @@ export default function App() {
           onUpdate={(id, patch, record = true) => apply((p) => P.updateLayer(p, id, patch), record)}
           onOnionChange={setOnion}
           onAddReference={() => imageInput.current?.click()}
+          playing={playing}
         /></div>}
       </div>
 

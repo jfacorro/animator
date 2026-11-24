@@ -91,7 +91,12 @@ npm run build    # static site in dist/
     transparent background if you like. Good for video editors.
 
   Sizes go from half to double the canvas size.
-- **Storage.** The project autosaves to IndexedDB after every change. In Chrome and Edge, *Save to
+- **Speed.** Each drawing is rendered once to a bitmap that covers only the
+  area it touches; bitmaps are kept within a memory budget and their canvases
+  reused. Frames that show the same drawings as the last one (held drawings,
+  animation on twos) aren't redrawn. Saving only writes the drawings that
+  changed, to the browser and to a linked file.
+- **Storage.** The project autosaves to IndexedDB after every change, one record per drawing. In Chrome and Edge, *Save to
   file…* (or *Open from file…*) links the animation to a file on disk, and every
   change after that also saves to that file. Elsewhere, saving downloads a copy.
 
@@ -160,8 +165,8 @@ Computer first: the standard tools of a digital 2D animation app.
 
 Next, in this order:
 
-1. **More export formats: MP4 video with sound, PNG image sequences** (this version)
-2. Faster with long animations and many layers
+1. ~~More export formats: MP4 video with sound, PNG image sequences~~ (done)
+2. **Faster with long animations and many layers** (this version)
 3. Ready for iPad and Apple Pencil
 4. Published online, so it works without a local copy
 

@@ -40,6 +40,8 @@ interface Props {
   onRemoveGroup: (groupId: string) => void;
   onOnionChange: (onion: OnionState) => void;
   onAddReference: () => void;
+  /** While playing, thumbnails stay on the frame playback started from. */
+  playing?: boolean;
 }
 
 export function LayersPanel(props: Props) {
@@ -48,6 +50,9 @@ export function LayersPanel(props: Props) {
   const group = selectedGroupId ? project.groups?.[selectedGroupId] ?? null : null;
   const index = project.layers.findIndex((l) => l.id === activeLayerId);
   const drag = useLayerDrag(props.onDrop);
+  const stillFrame = useRef(props.frame);
+  if (!props.playing) stillFrame.current = props.frame;
+  const thumbFrame = stillFrame.current;
 
   // Rows top first, with a header above each group's layers.
   const rows: React.ReactNode[] = [];
@@ -70,7 +75,7 @@ export function LayersPanel(props: Props) {
     const d = layerDrops(i, layer.groupId);
     rows.push(
       <LayerRow
-        key={layer.id} layer={layer} inGroup={!!g} groupHidden={!!g && !g.visible} {...props}
+        key={layer.id} layer={layer} inGroup={!!g} groupHidden={!!g && !g.visible} {...props} frame={thumbFrame}
         dragProps={drag.rowProps(layer.id, layer.id, 'layer', d.above, d.below)} dragClass={drag.rowClass(layer.id)}
       />,
     );
@@ -250,7 +255,12 @@ function Thumb({ project, layer, frame }: { project: Project; layer: Layer; fram
       const img = loadedImage(ref$.data);
       const k = w / project.width;
       if (img) ctx.drawImage(img, ref$.x * k, ref$.y * (h / project.height), ref$.width * k, ref$.height * (h / project.height));
-    } else if (drawing?.strokes.length) ctx.drawImage(drawingBitmap(drawing, project.width, project.height), 0, 0, w, h);
+    } else if (drawing?.strokes.length) {
+      const pic = drawingBitmap(drawing, project.width, project.height);
+      const k = w / project.width;
+      const kh = h / project.height;
+      if (pic) ctx.drawImage(pic.src, pic.x * k, pic.y * kh, pic.src.width * k, pic.src.height * kh);
+    }
   }, [drawing, ref$, loads, project.width, project.height]);
   return <canvas ref={ref} className="layer-thumb" width={104} height={60} aria-hidden="true" />;
 }

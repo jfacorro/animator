@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import * as I from './Icons';
 import { layerDrops, useLayerDrag } from './useLayerDrag';
 import { groupOf } from '../model/groups';
@@ -7,6 +7,9 @@ import type { AudioTrack } from '../model/project';
 import { celIndexAt, celStart, dropIndex, dropSlot, layerLength, sceneLength, type Layer, type Project } from '../model/project';
 
 const FW = 26; // frame width in px
+
+/** The frame under a click, from its position along the row. */
+const frameOfClick = (e: React.MouseEvent<HTMLElement>) => Math.max(0, Math.floor((e.clientX - e.currentTarget.getBoundingClientRect().left) / FW));
 const DRAG_THRESHOLD = 5; // px of movement before a press becomes a drag
 
 export type FrameAction = 'insert-left' | 'insert-right' | 'duplicate' | 'clear' | 'delete' | 'new-here' | 'copy' | 'paste';
@@ -285,24 +288,10 @@ export function Timeline(props: Props) {
           }}
         >
           <div style={{ width: columns * FW, position: 'relative', minHeight: '100%' }}>
-            <div className="ruler">
-              {Array.from({ length: columns }, (_, f) => (
-                <div
-                  key={f}
-                  className={`ruler-cell${f === frame ? ' current' : ''}${f >= length ? ' beyond' : ''}`}
-                  style={{ width: FW }}
-                  title={`Go to frame ${f + 1}`}
-                  onClick={() => props.onSelectFrame(f)}
-                >
-                  {f === frame || f === 0 || (f + 1) % 4 === 0 ? f + 1 : ''}
-                </div>
-              ))}
-            </div>
+            <RulerRow columns={columns} frame={frame} length={length} onSelectFrame={props.onSelectFrame} />
             {props.showCamera && (
               <div className="track special-track" title="Camera keys. Click a frame to go to it.">
-                <div className="track-grid" aria-hidden="true">
-                  {Array.from({ length: columns }, (_, f) => <div key={f} style={{ width: FW }} onClick={() => props.onSelectFrame(f)} />)}
-                </div>
+                <div className="track-grid" aria-hidden="true" onClick={(e) => props.onSelectFrame(frameOfClick(e))} />
                 {(project.camera ?? []).map((k) => (
                   <button
                     key={k.frame} className={`camera-key${k.frame === frame ? ' current' : ''}`} style={{ left: k.frame * FW + FW / 2 - 7 }}
@@ -320,6 +309,9 @@ export function Timeline(props: Props) {
             )}
             {topFirst.map((l) => {
               const dragging = drag?.layerId === l.id ? drag : null;
+              // Each cel's first frame, as a running sum (celStart per cel would be quadratic on long layers).
+              let acc = 0;
+              const starts = l.cels.map((c) => { const at = acc; acc += c.hold; return at; });
               return (
                 <div
                   className={`track${dragging ? ' dragging' : ''}`}
@@ -331,11 +323,9 @@ export function Timeline(props: Props) {
                   onPointerCancel={onTrackPointerCancel}
                   onContextMenu={(e) => onTrackContextMenu(l, e)}
                 >
-                  <div className="track-grid" aria-hidden="true">
-                    {Array.from({ length: columns }, (_, f) => <div key={f} style={{ width: FW }} />)}
-                  </div>
+                  <div className="track-grid" aria-hidden="true" />
                   {l.cels.map((c, i) => {
-                    const start = celStart(l, i);
+                    const start = starts[i];
                     const d = c.drawingId ? project.drawings[c.drawingId] : null;
                     const current = l.id === activeLayerId && i === celIndex;
                     const cls = [
@@ -397,7 +387,7 @@ export function Timeline(props: Props) {
   );
 }
 
-function AudioTrackRow({ audio, buffer, frames, columns, onSelectFrame, onChange }: {
+function AudioTrackRow({ audio, buffer, frames, onSelectFrame, onChange }: {
   audio: AudioTrack;
   buffer: AudioBuffer | null;
   frames: number;
@@ -435,9 +425,7 @@ function AudioTrackRow({ audio, buffer, frames, columns, onSelectFrame, onChange
 
   return (
     <div className="track special-track audio-track">
-      <div className="track-grid" aria-hidden="true">
-        {Array.from({ length: columns }, (_, f) => <div key={f} style={{ width: FW }} onClick={() => onSelectFrame(f)} />)}
-      </div>
+      <div className="track-grid" aria-hidden="true" onClick={(e) => onSelectFrame(frameOfClick(e))} />
       <div
         className="waveform"
         style={{ left: audio.start * FW, width }}
@@ -469,3 +457,17 @@ function AudioTrackRow({ audio, buffer, frames, columns, onSelectFrame, onChange
     </div>
   );
 }
+
+/** Frame numbers along the top. Only the labels are elements; the tick lines are a background. */
+const RulerRow = memo(function RulerRow({ columns, frame, length, onSelectFrame }: { columns: number; frame: number; length: number; onSelectFrame: (f: number) => void }) {
+  const labels: number[] = [0];
+  for (let f = 3; f < columns; f += 4) labels.push(f);
+  if (!labels.includes(frame)) labels.push(frame);
+  return (
+    <div className="ruler" style={{ width: columns * FW }} title="Click a frame number to go there" onClick={(e) => onSelectFrame(frameOfClick(e))}>
+      {labels.map((f) => (
+        <span key={f} className={`ruler-label${f === frame ? ' current' : ''}${f >= length ? ' beyond' : ''}`} style={{ left: f * FW, width: FW }}>{f + 1}</span>
+      ))}
+    </div>
+  );
+});
