@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { exportGif } from '../export/gif';
+import { canExportMp4, exportMp4, exportPngSequence } from '../export/video';
 import { sceneLength, type Project } from '../model/project';
 import { composeFrame } from '../render/render';
 import { downloadBlob, safeFileName } from '../storage';
@@ -10,10 +11,22 @@ interface Props {
   onClose: () => void;
 }
 
-const SIZES = [0.5, 0.75, 1];
+const SIZES = [0.5, 0.75, 1, 1.5, 2];
+
+type Format = 'gif' | 'mp4' | 'png';
+const FORMATS: { id: Format; name: string; note: string; help: string }[] = [
+  { id: 'gif', name: 'GIF', note: 'for sharing', help: 'Animated GIF: plays anywhere, loops, no sound' },
+  { id: 'mp4', name: 'MP4', note: 'video with sound', help: 'MP4 video: small, sharp, and includes the sound track' },
+  { id: 'png', name: 'PNG', note: 'image sequence', help: 'One PNG image per frame, in a zip file: for video editors and compositing' },
+];
+const EXT: Record<Format, string> = { gif: 'gif', mp4: 'mp4', png: 'zip' };
 
 export function ExportDialog({ project, onClose }: Props) {
+  const [format, setFormat] = useState<Format>('gif');
   const [scale, setScale] = useState(0.75);
+  const [sound, setSound] = useState(true);
+  const [note, setNote] = useState<string | null>(null);
+  const mp4 = canExportMp4();
   const [paper, setPaper] = useState(true);
   const [includeHidden, setIncludeHidden] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
@@ -23,18 +36,18 @@ export function ExportDialog({ project, onClose }: Props) {
   const frames = sceneLength(project);
   const seconds = (frames / project.fps).toFixed(1);
 
-  // Loop a live preview until the GIF is ready.
+  // Loop a live preview until the export is ready (a PNG sequence keeps previewing).
   useEffect(() => {
-    if (result) return;
+    if (result && format !== 'png') return;
     const ctx = previewRef.current?.getContext('2d');
     if (!ctx) return;
     let f = 0;
     const id = window.setInterval(() => {
-      composeFrame(ctx, project, f, { paper, includeHidden, camera: true });
+      composeFrame(ctx, project, f, { paper: paper || format === 'mp4', includeHidden, camera: true });
       f = (f + 1) % frames;
     }, 1000 / project.fps);
     return () => window.clearInterval(id);
-  }, [project, paper, includeHidden, frames, result]);
+  }, [project, paper, includeHidden, frames, result, format]);
 
   useEffect(() => () => { if (result) URL.revokeObjectURL(result.url); }, [result]);
 
@@ -46,9 +59,20 @@ export function ExportDialog({ project, onClose }: Props) {
 
   const run = async () => {
     setError(null);
+    setNote(null);
     setProgress(0);
+    const onProgress = (d: number, t: number) => setProgress(d / t);
     try {
-      const blob = await exportGif(project, { scale, paper, includeHidden, onProgress: (d, t) => setProgress(d / t) });
+      let blob: Blob;
+      if (format === 'mp4') {
+        const r = await exportMp4(project, { scale, includeHidden, sound, onProgress });
+        blob = r.blob;
+        if (r.soundNote) setNote(r.soundNote);
+      } else if (format === 'png') {
+        blob = await exportPngSequence(project, safeFileName(project.name), { scale, paper, includeHidden, onProgress });
+      } else {
+        blob = await exportGif(project, { scale, paper, includeHidden, onProgress });
+      }
       setResult({ blob, url: URL.createObjectURL(blob) });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Export failed');
@@ -58,7 +82,9 @@ export function ExportDialog({ project, onClose }: Props) {
   };
 
   const reset = () => setResult(null);
-  const fileName = `${safeFileName(project.name)}.gif`;
+  const fileName = `${safeFileName(project.name)}.${EXT[format]}`;
+  const what = format === 'mp4' ? 'video' : format === 'png' ? 'images' : 'GIF';
+  const size = (b: number) => (b > 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` : `${(b / 1024).toFixed(0)} KB`);
 
   return (
     <div className="backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -70,47 +96,66 @@ export function ExportDialog({ project, onClose }: Props) {
         <div className="dialog-body">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div className="preview">
-              {result ? <img src={result.url} alt="Exported GIF" /> : <canvas ref={previewRef} width={project.width} height={project.height} aria-label="Preview" />}
+              {result && format === 'gif' ? <img src={result.url} alt="Exported GIF" />
+                : result && format === 'mp4' ? <video src={result.url} controls autoPlay loop aria-label="Exported video" />
+                : <canvas ref={previewRef} width={project.width} height={project.height} aria-label="Preview" />}
             </div>
             <span className="muted">
-              {result ? `${fileName} · ${(result.blob.size / 1024).toFixed(0)} KB` : `${frames} frames at ${project.fps} fps = ${seconds} s, looping`}
+              {result
+                ? `${fileName} · ${size(result.blob.size)}${format === 'png' ? ` · ${frames} PNG images` : ''}`
+                : `${frames} frames at ${project.fps} fps = ${seconds} s${format === 'gif' ? ', looping' : ''}`}
             </span>
           </div>
           <div className="dialog-form">
             <div>
               <div className="muted" style={{ marginBottom: 8 }}>Format</div>
               <div className="format-grid">
-                <button className="format-option on" aria-pressed="true" title="Animated GIF: plays anywhere, good for sharing"><strong>GIF</strong><span>for sharing</span></button>
-                <button className="format-option" disabled title="MP4 video export is planned for a later phase"><strong>MP4</strong><span>coming in a later phase</span></button>
+                {FORMATS.map((f) => {
+                  const off = f.id === 'mp4' && !mp4;
+                  return (
+                    <button
+                      key={f.id} className={`format-option${format === f.id ? ' on' : ''}`} aria-pressed={format === f.id} disabled={off || progress !== null}
+                      title={off ? 'This browser can’t make videos. Chrome, Edge and Safari can.' : f.help}
+                      onClick={() => { setFormat(f.id); reset(); }}
+                    ><strong>{f.name}</strong><span>{off ? 'needs Chrome or Edge' : f.note}</span></button>
+                  );
+                })}
               </div>
             </div>
-            <label className="row" title="Width × height of the exported GIF in pixels. Smaller files load faster.">Size
+            <label className="row" title="Width × height in pixels. Smaller files load faster; bigger ones stay sharp on large screens.">Size
               <select value={scale} onChange={(e) => { setScale(Number(e.target.value)); reset(); }}>
                 {SIZES.map((s) => (
                   <option key={s} value={s}>{Math.round(project.width * s)} × {Math.round(project.height * s)}</option>
                 ))}
               </select>
             </label>
-            <label className="row" title="Paper white fills the background. Transparent lets the GIF sit on any colour.">Background
+            {format !== 'mp4' && <label className="row" title="Paper white fills the background. Transparent lets the pictures sit on any colour.">Background
               <select value={paper ? 'paper' : 'transparent'} onChange={(e) => { setPaper(e.target.value === 'paper'); reset(); }}>
                 <option value="paper">Paper white</option>
                 <option value="transparent">Transparent</option>
               </select>
-            </label>
+            </label>}
+            {format === 'mp4' && project.audio && (
+              <label className="row" style={{ justifyContent: 'flex-start' }} title="Put the sound track in the video">
+                <input type="checkbox" checked={sound} onChange={(e) => { setSound(e.target.checked); reset(); }} />
+                Include sound ({project.audio.name})
+              </label>
+            )}
             <label className="row" style={{ justifyContent: 'flex-start' }} title="Also export layers you have hidden with the eye icon">
               <input type="checkbox" checked={includeHidden} onChange={(e) => { setIncludeHidden(e.target.checked); reset(); }} />
               Include hidden layers
             </label>
             {error && <div className="error" role="alert">{error}</div>}
+            {note && <div className="muted" role="status">{note}</div>}
           </div>
         </div>
         <div className="dialog-foot">
           {progress !== null && <div className="progress" aria-label="Export progress"><div style={{ width: `${Math.round(progress * 100)}%` }} /></div>}
           <button className="btn" title="Close (Esc)" onClick={onClose}>Close</button>
           {result ? (
-            <button className="btn primary" title="Save the GIF to your computer" onClick={() => downloadBlob(result.blob, fileName)}>Download GIF</button>
+            <button className="btn primary" title={`Save the ${what} to your computer`} onClick={() => downloadBlob(result.blob, fileName)}>Download {format === 'png' ? 'zip' : format.toUpperCase()}</button>
           ) : (
-            <button className="btn primary" disabled={progress !== null} title="Create the GIF with these settings" onClick={run}>{progress !== null ? 'Exporting…' : 'Export GIF'}</button>
+            <button className="btn primary" disabled={progress !== null} title={`Create the ${what} with these settings`} onClick={run}>{progress !== null ? 'Exporting…' : `Export ${format === 'png' ? 'PNGs' : format.toUpperCase()}`}</button>
           )}
         </div>
       </div>
