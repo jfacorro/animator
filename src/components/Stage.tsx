@@ -429,7 +429,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       schedulePaint();
       return;
     }
-    onCommit((p) => addStroke(p, activeLayerId, frame, stroke, true));
+    onCommit((p) => addStroke(p, activeLayerId, frame, stroke));
   };
 
   /** Pull a point onto a nearby guide (within 8 screen px). */
@@ -625,7 +625,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       else paint();
     } else if (g.type === 'gradient') {
       const stroke = g.stroke;
-      onCommit((p) => addStroke(p, activeLayerId, frame, stroke, true));
+      onCommit((p) => addStroke(p, activeLayerId, frame, stroke));
     } else if (g.type === 'camera') {
       const v = g.view;
       if (v !== g.base) onCommit((p) => setCameraKey(p, frame, v));
@@ -635,11 +635,14 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       const strokes = drawing?.strokes ?? [];
       let hits = strokesInLasso(strokes, g.points);
       if (!hits.length && g.points.length < 6) {
-        // A click: pick the topmost stroke under the pointer.
+        // A click: pick the topmost stroke under the pointer. Lines show above fills, so try them first.
         const [x, y] = g.points[0];
-        for (let i = strokes.length - 1; i >= 0; i--) {
-          const b = strokeBounds(strokes[i]);
-          if (b && x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1) { hits = [i]; break; }
+        for (const fills of [false, true]) {
+          for (let i = strokes.length - 1; i >= 0 && !hits.length; i--) {
+            if ((strokes[i].kind === 'fill') !== fills || strokes[i].erase) continue;
+            const b = strokeBounds(strokes[i]);
+            if (b && x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1) hits = [i];
+          }
         }
       }
       onSelectionChange(hits.length ? hits : null);

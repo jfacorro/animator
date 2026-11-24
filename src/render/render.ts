@@ -101,6 +101,56 @@ function fillStyleFor(ctx: CanvasRenderingContext2D, s: Stroke): string | Canvas
   return grad;
 }
 
+/**
+ * How a drawing is painted: paint-bucket fills on one sheet, lines on another
+ * laid over it. The eraser works on both sheets in the order it was used, so
+ * it removes what was there when you erased, but never a fill added later.
+ */
+export function drawingPasses(strokes: Stroke[]): { fills: Stroke[]; lines: Stroke[] } {
+  const fills: Stroke[] = [];
+  const lines: Stroke[] = [];
+  let seenFill = false;
+  for (const s of strokes) {
+    if (s.kind === 'fill') { fills.push(s); seenFill = true; continue; }
+    lines.push(s);
+    if (s.erase && seenFill) fills.push(s);
+  }
+  return { fills, lines };
+}
+
+let fillSheet: HTMLCanvasElement | null = null;
+
+/** Paint a drawing's strokes, with its fills under its lines (see drawingPasses). */
+export function paintDrawing(ctx: CanvasRenderingContext2D, strokes: Stroke[]) {
+  const { fills, lines } = drawingPasses(strokes);
+  if (!fills.length) { for (const s of lines) paintStroke(ctx, s); return; }
+  if (!fills.some((s) => s.erase)) {
+    // Nothing to erase from the fills: they can go straight onto the page first.
+    for (const s of fills) paintStroke(ctx, s);
+    for (const s of lines) paintStroke(ctx, s);
+    return;
+  }
+  const { width, height } = ctx.canvas;
+  if (!fillSheet) fillSheet = makeCanvas(width, height);
+  if (fillSheet.width < width || fillSheet.height < height) {
+    fillSheet.width = Math.max(fillSheet.width, width);
+    fillSheet.height = Math.max(fillSheet.height, height);
+  }
+  const fctx = fillSheet.getContext('2d')!;
+  fctx.setTransform(1, 0, 0, 1, 0, 0);
+  fctx.globalAlpha = 1;
+  fctx.globalCompositeOperation = 'source-over';
+  fctx.clearRect(0, 0, width, height);
+  fctx.setTransform(ctx.getTransform());
+  for (const s of fills) paintStroke(fctx, s);
+  for (const s of lines) paintStroke(ctx, s);
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = 'destination-over';
+  ctx.drawImage(fillSheet, 0, 0, width, height, 0, 0, width, height);
+  ctx.restore();
+}
+
 /** Paint one stroke. `live` skips caching for a stroke still being drawn. */
 export function paintStroke(ctx: CanvasRenderingContext2D, s: Stroke, live = false) {
   const kind = s.kind ?? 'free';
@@ -295,7 +345,7 @@ export function drawingBitmap(d: Drawing, w: number, h: number): Pic | null {
     const c = bitmapCanvas(cw, ch);
     const ctx = c.getContext('2d')!;
     ctx.translate(-box.x, -box.y);
-    for (const s of d.strokes) paintStroke(ctx, s);
+    paintDrawing(ctx, d.strokes);
     return { src: c, x: box.x, y: box.y };
   });
 }

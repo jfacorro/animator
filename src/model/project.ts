@@ -240,19 +240,14 @@ export function ensureDrawingAt(project: Project, layerId: string, frame: number
 }
 
 /**
- * Add a stroke on top, or with `under` (paint-bucket fills) underneath the
- * lines but above earlier fills, like painting a cel from behind.
+ * Add a stroke after the drawing's others. Paint-bucket fills still show under
+ * the lines, like painting a cel from behind: see paintDrawing.
  */
-export function addStroke(project: Project, layerId: string, frame: number, stroke: Stroke, under = false): Project {
+export function addStroke(project: Project, layerId: string, frame: number, stroke: Stroke): Project {
   const ensured = ensureDrawingAt(project, layerId, frame);
   const p = ensured.project;
   const drawing = p.drawings[ensured.drawingId];
-  let strokes = [...drawing.strokes, stroke];
-  if (under) {
-    const firstLine = drawing.strokes.findIndex((s) => s.kind !== 'fill');
-    const at = firstLine < 0 ? drawing.strokes.length : firstLine;
-    strokes = [...drawing.strokes.slice(0, at), stroke, ...drawing.strokes.slice(at)];
-  }
+  const strokes = [...drawing.strokes, stroke];
   return { ...p, drawings: { ...p.drawings, [drawing.id]: { ...drawing, strokes } } };
 }
 

@@ -194,13 +194,13 @@ function createProjectWith(layerId: string) {
 describe('stroke editing', () => {
   const s = (kind: Stroke['kind'], color = '#000'): Stroke => ({ ...stroke, kind, color });
 
-  it('puts fills under the lines but above earlier fills', () => {
+  it('keeps strokes in the order they were made, fills too', () => {
     let p = createProject();
     const id = p.layers[1].id;
     p = addStroke(p, id, 0, s('free'));
-    p = addStroke(p, id, 0, s('fill', 'red'), true);
-    p = addStroke(p, id, 0, s('fill', 'blue'), true);
-    expect(drawingAt(p, p.layers[1], 0)!.strokes.map((x) => x.color)).toEqual(['red', 'blue', '#000']);
+    p = addStroke(p, id, 0, s('fill', 'red'));
+    p = addStroke(p, id, 0, s('fill', 'blue'));
+    expect(drawingAt(p, p.layers[1], 0)!.strokes.map((x) => x.color)).toEqual(['#000', 'red', 'blue']);
   });
 
   it('moves, duplicates and deletes selected strokes', () => {
