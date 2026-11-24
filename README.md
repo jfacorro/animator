@@ -79,9 +79,18 @@ npm run build    # static site in dist/
   where it starts. It plays along with playback, and with *Scrub sound* on,
   each frame step plays that frame's slice for lip-sync. The scene runs at
   least as long as the sound. GIF export has no sound.
-- **Export.** GIFs are encoded in the browser with
-  [gifenc](https://github.com/mattdesl/gifenc). Held drawings become a single
-  GIF frame with a longer delay, so files stay small.
+- **Export.** Three formats, all made in the browser:
+  - *GIF* with [gifenc](https://github.com/mattdesl/gifenc). Held drawings
+    become a single GIF frame with a longer delay, so files stay small.
+  - *MP4* video (H.264, or VP9 where H.264 isn't available) with the sound
+    track (AAC, or Opus), encoded with WebCodecs and packed with
+    [mp4-muxer](https://github.com/Vanilagy/mp4-muxer). Needs Chrome, Edge or
+    a recent Safari.
+  - *PNG* image sequence: one numbered PNG per frame (`name_0001.png`, …) in
+    a zip, made with [fflate](https://github.com/101arrowz/fflate), with a
+    transparent background if you like. Good for video editors.
+
+  Sizes go from half to double the canvas size.
 - **Storage.** The project autosaves to IndexedDB after every change. In Chrome and Edge, *Save to
   file…* (or *Open from file…*) links the animation to a file on disk, and every
   change after that also saves to that file. Elsewhere, saving downloads a copy.
@@ -149,4 +158,11 @@ Computer first: the standard tools of a digital 2D animation app.
 4. ~~Layers: groups, blend modes, clipping masks~~ (done)
 5. ~~Extras: symmetry, rulers and guides, a reference image layer, text, gradients, custom shortcuts~~ (done)
 
-Later: MP4 export and an installable app for iPad. Importing photos of paper drawings is parked.
+Next, in this order:
+
+1. **More export formats: MP4 video with sound, PNG image sequences** (this version)
+2. Faster with long animations and many layers
+3. Ready for iPad and Apple Pencil
+4. Published online, so it works without a local copy
+
+Importing photos of paper drawings is parked.
