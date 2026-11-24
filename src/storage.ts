@@ -1,11 +1,37 @@
-import { del, get, set } from 'idb-keyval';
-import { isProject, type Project } from './model/project';
+import { del, delMany, get, getMany, set, setMany } from 'idb-keyval';
+import { isProject, type Drawing, type Project } from './model/project';
 
 // Projects live in the browser's IndexedDB: no server, no account.
 const CURRENT_KEY = 'animator:current-project';
 
+// The project is stored in pieces: the project without its drawings, and
+// each drawing under its own key. Drawings never change once made (an edit
+// makes a new drawing object), so a save only writes the drawings that are
+// new since the last one, instead of copying the whole animation each time.
+const META_KEY = 'animator:current-meta';
+const drawingKey = (id: string) => `animator:d:${id}`;
+type StoredMeta = Omit<Project, 'drawings'> & { drawingIds: string[] };
+
+/** The drawing object last written under each id. (Undo can bring back an older object for the same id.) */
+let stored = new Map<string, Drawing>();
+
 export async function loadCurrentProject(): Promise<Project | null> {
   try {
+    const meta = (await get(META_KEY)) as StoredMeta | undefined;
+    if (meta?.drawingIds) {
+      const list = (await getMany(meta.drawingIds.map(drawingKey))) as (Drawing | undefined)[];
+      const drawings: Record<string, Drawing> = {};
+      meta.drawingIds.forEach((id, i) => {
+        const d = list[i];
+        if (d) drawings[id] = d;
+      });
+      stored = new Map(Object.entries(drawings));
+      const { drawingIds: _ids, ...rest } = meta;
+      void _ids;
+      const project = { ...rest, drawings };
+      return isProject(project) ? project : null;
+    }
+    // Saved by an older version, in one piece.
     const value = await get(CURRENT_KEY);
     return isProject(value) ? value : null;
   } catch {
@@ -13,8 +39,52 @@ export async function loadCurrentProject(): Promise<Project | null> {
   }
 }
 
-export async function saveCurrentProject(project: Project): Promise<void> {
-  await set(CURRENT_KEY, project);
+let saving: Promise<void> = Promise.resolve();
+
+export function saveCurrentProject(project: Project): Promise<void> {
+  // One save at a time, in order, so a slow save can't land after a newer one.
+  saving = saving.catch(() => {}).then(() => writeCurrent(project));
+  return saving;
+}
+
+async function writeCurrent(project: Project): Promise<void> {
+  const { drawings, ...rest } = project;
+  const ids = Object.keys(drawings);
+  const fresh: [string, Drawing][] = [];
+  for (const id of ids) if (stored.get(id) !== drawings[id]) fresh.push([id, drawings[id]]);
+  const gone = [...stored.keys()].filter((id) => !(id in drawings));
+  if (fresh.length) await setMany(fresh.map(([id, d]) => [drawingKey(id), d]));
+  for (const [id, d] of fresh) stored.set(id, d);
+  const meta: StoredMeta = { ...rest, drawingIds: ids };
+  await set(META_KEY, meta);
+  for (const id of gone) stored.delete(id);
+  if (gone.length) await delMany(gone.map(drawingKey));
+  if (!legacyCleared) {
+    legacyCleared = true;
+    await del(CURRENT_KEY); // the one-piece copy from older versions, if any
+  }
+}
+let legacyCleared = false;
+
+// Project files are JSON. Each drawing's JSON is kept, so writing the file
+// again after a change only turns the changed drawings into text.
+const drawingJson = new WeakMap<Drawing, string>();
+
+/** The project as JSON text: the same as JSON.stringify(project), made faster. */
+export function projectJson(project: Project): string {
+  const { drawings, ...meta } = project;
+  const head = JSON.stringify(meta);
+  const parts: string[] = [];
+  for (const id of Object.keys(drawings)) {
+    const d = drawings[id];
+    let j = drawingJson.get(d);
+    if (j === undefined) {
+      j = JSON.stringify(d);
+      drawingJson.set(d, j);
+    }
+    parts.push(`${JSON.stringify(id)}:${j}`);
+  }
+  return `${head.slice(0, -1)}${head.length > 2 ? ',' : ''}"drawings":{${parts.join(',')}}}`;
 }
 
 export function downloadBlob(blob: Blob, filename: string) {
@@ -33,7 +103,7 @@ export function safeFileName(name: string): string {
 }
 
 export function saveProjectFile(project: Project) {
-  const blob = new Blob([JSON.stringify(project)], { type: 'application/json' });
+  const blob = new Blob([projectJson(project)], { type: 'application/json' });
   downloadBlob(blob, `${safeFileName(project.name)}.animator.json`);
 }
 
@@ -93,7 +163,7 @@ export async function pickOpenFile(): Promise<{ project: Project; handle: FileSy
 
 export async function writeProjectFile(file: LinkedFile, project: Project): Promise<void> {
   const writable = await file.handle.createWritable();
-  await writable.write(JSON.stringify(project));
+  await writable.write(projectJson(project));
   await writable.close();
 }
 

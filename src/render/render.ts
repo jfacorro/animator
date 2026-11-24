@@ -155,12 +155,97 @@ function makeCanvas(w: number, h: number): HTMLCanvasElement {
   return c;
 }
 
+/** A rendered picture and where its top-left corner sits on the canvas. */
+export interface Pic {
+  src: HTMLCanvasElement;
+  x: number;
+  y: number;
+}
+
+/** The part of the canvas a drawing can touch, in whole px, or null when it paints nothing. */
+export function drawingBox(d: Drawing, w: number, h: number): { x: number; y: number; w: number; h: number } | null {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  const add = (m: Stroke['matrix'], x: number, y: number, pad: number) => {
+    const [px, py] = m ? [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]] : [x, y];
+    if (px - pad < x0) x0 = px - pad;
+    if (py - pad < y0) y0 = py - pad;
+    if (px + pad > x1) x1 = px + pad;
+    if (py + pad > y1) y1 = py + pad;
+  };
+  for (const s of d.strokes) {
+    if (s.erase) continue; // erasing only takes paint away
+    const m = s.matrix;
+    const grow = m ? Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) : 1;
+    const kind = s.kind ?? 'free';
+    if (kind === 'fill') {
+      const sp = s.spans ?? [];
+      let fx0 = Infinity, fy0 = Infinity, fx1 = -Infinity, fy1 = -Infinity;
+      for (let i = 0; i < sp.length; i += 3) {
+        fy0 = Math.min(fy0, sp[i]); fy1 = Math.max(fy1, sp[i] + 1);
+        fx0 = Math.min(fx0, sp[i + 1]); fx1 = Math.max(fx1, sp[i + 2] + 1);
+      }
+      if (fx0 === Infinity) continue;
+      for (const [x, y] of [[fx0, fy0], [fx1, fy0], [fx0, fy1], [fx1, fy1]]) add(m, x, y, 2);
+      continue;
+    }
+    if (kind === 'text') {
+      const [a, b] = s.points;
+      if (!a || !b) continue;
+      const pad = s.size * 0.35 + 2; // slanted and overhanging letters
+      for (const [x, y] of [[a[0], a[1]], [b[0], a[1]], [a[0], b[1]], [b[0], b[1]]]) add(m, x, y, pad * grow);
+      continue;
+    }
+    // Lines: the widest a pressure stroke gets, plus a soft edge's blur.
+    const pad = (s.size + (s.softness ? s.size * s.softness * 0.9 : 0)) * grow + 2;
+    for (const p of s.points) add(m, p[0], p[1], pad);
+  }
+  const bx0 = Math.max(0, Math.floor(x0));
+  const by0 = Math.max(0, Math.floor(y0));
+  const bx1 = Math.min(w, Math.ceil(x1));
+  const by1 = Math.min(h, Math.ceil(y1));
+  return bx1 > bx0 && by1 > by0 ? { x: bx0, y: by0, w: bx1 - bx0, h: by1 - by0 } : null;
+}
+
 // Drawings are immutable, so a rendered bitmap stays valid for as long as
-// the drawing object lives. A small LRU keeps memory bounded.
-const CACHE_LIMIT = 80;
-const cache = new Map<string, HTMLCanvasElement>();
+// the drawing object lives. Bitmaps cover only the area a drawing touches,
+// and the cache keeps as many as fit in a memory budget, least recently used
+// going first.
+const CACHE_BYTES = 384 * 1024 * 1024;
+const cache = new Map<string, Pic | null>();
+let cacheBytes = 0;
 const cacheKeys = new WeakMap<Drawing, Map<string, string>>();
 let keyCounter = 0;
+const picBytes = (p: Pic | null) => (p ? p.src.width * p.src.height * 4 : 64);
+
+// Canvases of bitmaps that left the cache, kept for reuse: making a new
+// canvas costs more than clearing an old one. Sizes are rounded up to 64 px
+// so that drawings of about the same size can share them.
+const spare = new Map<string, HTMLCanvasElement[]>();
+let spareCount = 0;
+const SPARE_LIMIT = 48;
+const round64 = (v: number) => Math.ceil(v / 64) * 64;
+function bitmapCanvas(w: number, h: number): HTMLCanvasElement {
+  const list = spare.get(`${w}x${h}`);
+  const c = list?.pop();
+  if (c) {
+    spareCount--;
+    const ctx = c.getContext('2d')!;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.clearRect(0, 0, w, h);
+    return c;
+  }
+  return makeCanvas(w, h);
+}
+function retire(p: Pic | null) {
+  if (!p || spareCount >= SPARE_LIMIT) return;
+  const k = `${p.src.width}x${p.src.height}`;
+  const list = spare.get(k) ?? [];
+  list.push(p.src);
+  spare.set(k, list);
+  spareCount++;
+}
 
 function cacheKey(d: Drawing, variant: string, w: number, h: number): string {
   let byVariant = cacheKeys.get(d);
@@ -177,38 +262,56 @@ function cacheKey(d: Drawing, variant: string, w: number, h: number): string {
   return key;
 }
 
-function cached(key: string, build: () => HTMLCanvasElement): HTMLCanvasElement {
-  const hit = cache.get(key);
-  if (hit) {
+function cached(key: string, build: () => Pic | null): Pic | null {
+  if (cache.has(key)) {
+    const hit = cache.get(key)!;
     cache.delete(key);
     cache.set(key, hit);
     return hit;
   }
-  const c = build();
-  cache.set(key, c);
-  while (cache.size > CACHE_LIMIT) cache.delete(cache.keys().next().value!);
-  return c;
+  const pic = build();
+  cache.set(key, pic);
+  cacheBytes += picBytes(pic);
+  while (cacheBytes > CACHE_BYTES && cache.size > 1) {
+    const oldest = cache.keys().next().value!;
+    const gone = cache.get(oldest)!;
+    cacheBytes -= picBytes(gone);
+    cache.delete(oldest);
+    retire(gone);
+  }
+  return pic;
 }
 
-export function drawingBitmap(d: Drawing, w: number, h: number): HTMLCanvasElement {
+/** The drawing rendered on its own, or null when it shows nothing. */
+export function drawingBitmap(d: Drawing, w: number, h: number): Pic | null {
   return cached(cacheKey(d, 'plain', w, h), () => {
-    const c = makeCanvas(w, h);
+    const box = drawingBox(d, w, h);
+    if (!box) return null;
+    // Grow the box to the rounded canvas size, staying on the page.
+    const cw = Math.min(w, round64(box.w));
+    const ch = Math.min(h, round64(box.h));
+    box.x = Math.max(0, Math.min(box.x, w - cw));
+    box.y = Math.max(0, Math.min(box.y, h - ch));
+    const c = bitmapCanvas(cw, ch);
     const ctx = c.getContext('2d')!;
+    ctx.translate(-box.x, -box.y);
     for (const s of d.strokes) paintStroke(ctx, s);
-    return c;
+    return { src: c, x: box.x, y: box.y };
   });
 }
 
 /** The drawing recoloured in one flat colour, for onion skins. */
-export function tintedBitmap(d: Drawing, color: string, w: number, h: number): HTMLCanvasElement {
+export function tintedBitmap(d: Drawing, color: string, w: number, h: number): Pic | null {
   return cached(cacheKey(d, `tint:${color}`, w, h), () => {
-    const c = makeCanvas(w, h);
+    const plain = drawingBitmap(d, w, h);
+    if (!plain) return null;
+    const c = bitmapCanvas(plain.src.width, plain.src.height);
     const ctx = c.getContext('2d')!;
-    ctx.drawImage(drawingBitmap(d, w, h), 0, 0);
+    ctx.drawImage(plain.src, 0, 0);
     ctx.globalCompositeOperation = 'source-in';
     ctx.fillStyle = color;
-    ctx.fillRect(0, 0, w, h);
-    return c;
+    ctx.fillRect(0, 0, c.width, c.height);
+    return { src: c, x: plain.x, y: plain.y };
   });
 }
 
@@ -293,7 +396,7 @@ export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, fr
   const shown = (l: Layer) => l.visible || !!opts.includeHidden;
 
   /** The layer's picture at this frame (with any stroke in progress), or null when empty. */
-  const picture = (layer: Layer): CanvasImageSource | null => {
+  const picture = (layer: Layer): Pic | null => {
     const ref = layer.reference;
     if (ref) {
       const img = opts.references ? loadedImage(ref.data) : null;
@@ -301,7 +404,7 @@ export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, fr
       const rctx = borrow(w, h);
       rctx.imageSmoothingQuality = 'high';
       rctx.drawImage(img, ref.x, ref.y, ref.width, ref.height);
-      return rctx.canvas; // given back after the frame
+      return { src: rctx.canvas, x: 0, y: 0 }; // given back after the frame
     }
     const i = celIndexAt(layer, frame);
     const id = i >= 0 ? layer.cels[i].drawingId : null;
@@ -309,9 +412,10 @@ export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, fr
     if (opts.live && opts.live.layerId === layer.id) {
       // Base drawing plus the stroke in progress, so the eraser previews too.
       const sctx = borrow(w, h);
-      if (d) sctx.drawImage(drawingBitmap(d, w, h), 0, 0);
+      const base = d ? drawingBitmap(d, w, h) : null;
+      if (base) sctx.drawImage(base.src, base.x, base.y);
       for (const s of opts.live.strokes) paintStroke(sctx, s, true);
-      return sctx.canvas; // given back after the frame
+      return { src: sctx.canvas, x: 0, y: 0 }; // given back after the frame
     }
     return d && d.strokes.length ? drawingBitmap(d, w, h) : null;
   };
@@ -328,7 +432,8 @@ export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, fr
       if (!d || !d.strokes.length) return;
       target.globalAlpha = (onion.opacity ?? 0.45) * (1 - (step - 1) / (count + 0.5));
       target.globalCompositeOperation = 'source-over';
-      target.drawImage(tintedBitmap(d, color, w, h), 0, 0);
+      const t = tintedBitmap(d, color, w, h);
+      if (t) target.drawImage(t.src, t.x, t.y);
     };
     for (let k = onion.before; k >= 1; k--) draw(anchor - k, onion.beforeColor ?? ONION_BEFORE, k, onion.before);
     if (i >= 0) for (let k = onion.after; k >= 1; k--) draw(anchor + k, onion.afterColor ?? ONION_AFTER, k, onion.after);
@@ -343,30 +448,33 @@ export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, fr
     const clips = clipped.filter(shown);
     for (const c of clips) onionSkins(target, c, c.locked || groupLocked);
     if (!img) return;
-    let out: CanvasImageSource = img;
+    let out: Pic = img;
     if (clips.length) {
+      // The base at full size: the mask clipped layers are cut to.
+      const mctx = borrow(w, h);
+      mctx.drawImage(img.src, img.x, img.y);
       const bctx = borrow(w, h);
-      bctx.drawImage(img, 0, 0);
+      bctx.drawImage(mctx.canvas, 0, 0);
       for (const c of clips) {
         const cimg = picture(c);
         if (!cimg) continue;
         // The clipped layer, cut to where the base has paint, then blended onto it.
         const tctx = borrow(w, h);
         tctx.globalAlpha = c.opacity;
-        tctx.drawImage(cimg, 0, 0);
+        tctx.drawImage(cimg.src, cimg.x, cimg.y);
         tctx.globalAlpha = 1;
         tctx.globalCompositeOperation = 'destination-in';
-        tctx.drawImage(img, 0, 0);
+        tctx.drawImage(mctx.canvas, 0, 0);
         bctx.globalCompositeOperation = compositeOp(c.blend);
         bctx.drawImage(tctx.canvas, 0, 0);
         bctx.globalCompositeOperation = 'source-over';
         giveBack();
       }
-      out = bctx.canvas;
+      out = { src: bctx.canvas, x: 0, y: 0 };
     }
     target.globalAlpha = base.opacity;
     target.globalCompositeOperation = compositeOp(base.blend);
-    target.drawImage(out, 0, 0);
+    target.drawImage(out.src, out.x, out.y);
     target.globalAlpha = 1;
     target.globalCompositeOperation = 'source-over';
   };
