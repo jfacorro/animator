@@ -58,3 +58,4 @@ export const Image = () => <Icon size={16}><rect x="3" y="4" width="18" height="
 export const PaintLayer = () => <Icon size={16}><path d="M4 20c3 0 5-2 5-4a3 3 0 0 0-5 0c0 1 .5 2 0 4z" /><path d="M9 14l10-10 1 1-10 10" /></Icon>;
 export const Text = () => <Icon><path d="M5 6V4h14v2M12 4v16M9 20h6" /></Icon>;
 export const Keyboard = () => <Icon size={16}><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" /></Icon>;
+export const Sliders = () => <Icon size={18}><path d="M4 7h9M17 7h3M4 17h3M11 17h9" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="17" r="2" /></Icon>;

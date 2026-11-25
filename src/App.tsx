@@ -18,7 +18,9 @@ import * as P from './model/project';
 import { groupLayer, isLocked, isShown, moveGroupToGap, removeGroup, ungroup, updateGroup } from './model/groups';
 import { cameraAt, hasCamera, keyAt, removeCameraKey, setCameraKey } from './model/camera';
 import { readAudioFile, useAudioPlayback } from './audio';
-import { matchingPreset, PRESETS, type BrushPreset } from './model/brushes';
+import { matchingPreset, PRESETS, validBrush, type BrushPreset } from './model/brushes';
+import { BrushEditor } from './components/BrushEditor';
+import { BrushSample } from './components/BrushSample';
 import {
   canSaveToFile, filePermission, loadCurrentProject, loadLinkedFile, pickOpenFile, pickSaveFile, readProjectFile, rememberLinkedFile,
   saveCurrentProject, saveProjectFile, writeProjectFile, type LinkedFile,
@@ -47,6 +49,7 @@ const KEYS_KEY = 'animator:keys';
 const DEFAULT_PALETTE = ['#1a1a1a', '#6b6f78', '#e5534b', '#f08a3a', '#f2c94c', '#6faf6a', '#5b8fd9', '#9b6fd6', '#ffffff'];
 const PALETTE_KEY = 'animator:palette';
 const BRUSH_KEY = 'animator:brush';
+const BRUSHES_KEY = 'animator:brushes';
 const ONION_KEY = 'animator:onion';
 const SCRUB_KEY = 'animator:scrub';
 const PANELS_KEY = 'animator:panels';
@@ -57,20 +60,22 @@ const PEN_SEEN_KEY = 'animator:pen-seen';
 type Fingers = 'auto' | 'draw' | 'navigate';
 
 interface Panels {
-  tools: number;
+  /** Width of the left panel with the current tool's settings. */
+  options: number;
   layers: number;
   timeline: number;
+  /** The bar of tools under the top bar. */
   hideTools: boolean;
   hideLayers: boolean;
   hideTimeline: boolean;
-  /** The bar with the current tool's settings, under the top bar. */
+  /** The left panel with the current tool's settings. */
   hideOptions: boolean;
 }
-const DEFAULT_PANELS: Panels = { tools: 60, layers: 280, timeline: 220, hideTools: false, hideLayers: false, hideTimeline: false, hideOptions: false };
+const DEFAULT_PANELS: Panels = { options: 230, layers: 280, timeline: 220, hideTools: false, hideLayers: false, hideTimeline: false, hideOptions: false };
 /** A phone, or a small window: start with the layers panel hidden and a short timeline. */
 const smallScreen = () => typeof window !== 'undefined' && (window.innerWidth < 760 || window.innerHeight < 520);
-const COMPACT_PANELS: Partial<Panels> = { layers: 220, timeline: 110, hideLayers: true };
-const PANEL_LIMITS = { tools: [52, 160], layers: [200, 560], timeline: [110, 640] } as const;
+const COMPACT_PANELS: Partial<Panels> = { options: 170, layers: 220, timeline: 110, hideLayers: true };
+const PANEL_LIMITS = { options: [110, 420], layers: [200, 560], timeline: [110, 640] } as const;
 const clampPanel = (k: keyof typeof PANEL_LIMITS, v: number) => Math.round(Math.min(PANEL_LIMITS[k][1], Math.max(PANEL_LIMITS[k][0], v)));
 const MAX_PALETTE = 24;
 
@@ -79,6 +84,7 @@ const DEFAULT_BRUSH: BrushSettings = {
   color: '#1a1a1a', eraserSize: 24, liquifySize: 80, fxSize: 40, fxStrength: 0.6, pressure: true, fillShapes: false,
   fillMode: 'solid', color2: '#ffffff', fadeOut: true, font: 'sans', textSize: 48, bold: false,
   size: INK.size, opacity: INK.opacity, smoothing: INK.smoothing, stabilizer: INK.stabilizer, thinning: INK.thinning, softness: INK.softness,
+  grain: 'none', grainAmount: 0,
 };
 
 /** Per-browser preferences: the palette and the last brush. Storage can be blocked, so every access is guarded. */
@@ -134,9 +140,17 @@ export default function App() {
   const [palette, setPalette] = useState<string[]>(() => loadPref(PALETTE_KEY, DEFAULT_PALETTE, (v) => Array.isArray(v) && v.length > 0 && v.every(isHex)));
   useEffect(() => { savePref(BRUSH_KEY, brush); }, [brush]);
   useEffect(() => { savePref(PALETTE_KEY, palette); }, [palette]);
-  const preset = matchingPreset(brush);
+  /** Brushes the user saved in the brush editor. */
+  const [savedBrushes, setSavedBrushes] = useState<BrushPreset[]>(() => {
+    const list = loadPref<unknown[]>(BRUSHES_KEY, [], Array.isArray);
+    return list.map(validBrush).filter((b): b is BrushPreset => !!b);
+  });
+  useEffect(() => { savePref(BRUSHES_KEY, savedBrushes); }, [savedBrushes]);
+  const [brushEditor, setBrushEditor] = useState(false);
+  const preset = matchingPreset(brush, savedBrushes);
   const usePreset = (p: BrushPreset) => setBrush((b) => ({
     ...b, size: p.size, opacity: p.opacity, smoothing: p.smoothing, stabilizer: p.stabilizer, thinning: p.thinning, softness: p.softness, pressure: p.thinning > 0,
+    grain: p.grain ?? 'none', grainAmount: p.grainAmount ?? 0,
   }));
   const [selection, setSelection] = useState<number[] | null>(null);
   /** Paint layers: the outline of the selected area. */
@@ -211,11 +225,16 @@ export default function App() {
   const keyHint = (id: ActionId) => (keymap[id] ? ` (${displayKey(keymap[id])})` : '');
 
   const length = P.sceneLength(project);
-  const [panels, setPanels] = useState<Panels>(() => ({ ...DEFAULT_PANELS, ...(smallScreen() ? COMPACT_PANELS : {}), ...loadPref<Partial<Panels>>(PANELS_KEY, {}, (v) => typeof v === 'object') }));
+  const [panels, setPanels] = useState<Panels>(() => {
+    const p: Panels = { ...DEFAULT_PANELS, ...(smallScreen() ? COMPACT_PANELS : {}), ...loadPref<Partial<Panels>>(PANELS_KEY, {}, (v) => typeof v === 'object') };
+    // Sizes saved before the limits changed are brought back inside them.
+    for (const k of Object.keys(PANEL_LIMITS) as (keyof typeof PANEL_LIMITS)[]) p[k] = clampPanel(k, Number(p[k]) || DEFAULT_PANELS[k]);
+    return p;
+  });
   useEffect(() => { savePref(PANELS_KEY, panels); }, [panels]);
   /** Panel size when a resize drag started. */
   const panelStart = useRef<Panels | null>(null);
-  const resizePanel = (k: 'tools' | 'layers' | 'timeline') => (grow: number, done: boolean) => {
+  const resizePanel = (k: 'options' | 'layers' | 'timeline') => (grow: number, done: boolean) => {
     if (!panelStart.current) panelStart.current = panels;
     const base = panelStart.current[k];
     setPanels((p) => ({ ...p, [k]: clampPanel(k, base + grow) }));
@@ -507,7 +526,7 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
-      if (exporting || shortcutsOpen) return;
+      if (exporting || shortcutsOpen || brushEditor) return;
       // Space still plays after clicking a button, slider or checkbox: let go of its focus
       // so the browser doesn't also press or toggle it.
       const textField = t.closest('textarea, select, input:not([type=range]):not([type=checkbox]):not([type=color]):not([type=radio])');
@@ -590,7 +609,7 @@ export default function App() {
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
     };
-  }, [exporting, frame, length, tool, togglePlay, goTo, newDrawing, duplicate, selection, deleteSelection, copyStrokes, pasteStrokes, activeLayerId, activeLayer, apply, project, notify, keymap, shortcutsOpen, paintSel, editPaintArea]);
+  }, [exporting, frame, length, tool, togglePlay, goTo, newDrawing, duplicate, selection, deleteSelection, copyStrokes, pasteStrokes, activeLayerId, activeLayer, apply, project, notify, keymap, shortcutsOpen, brushEditor, paintSel, editPaintArea]);
 
   const newProject = () => {
     setMenuOpen(false);
@@ -651,6 +670,17 @@ export default function App() {
       lastWritten.current = null; // write the latest version straight away
       setFileStatus('saved');
     }
+  };
+
+  const addLineLayer = () => {
+    const r = P.addLayer(project, `Layer ${project.layers.length + 1}`, activeLayerId);
+    apply(() => r.project);
+    setActiveLayerId(r.layerId);
+  };
+  const addPaintLayer = () => {
+    const r = P.addLayer(project, `Paint ${project.layers.filter((l) => l.paint).length + 1}`, activeLayerId, { paint: true });
+    apply(() => r.project);
+    setActiveLayerId(r.layerId);
   };
 
   const fileLinked = linked && linked.projectId === project.id ? linked : null;
@@ -742,14 +772,30 @@ export default function App() {
         <button className="btn primary" title="Export the animation as a GIF" onClick={() => { setPlaying(false); setExporting(true); }}>Export</button>
       </header>
 
-      {!panels.hideOptions && <div className="tool-options">
-        <span className="tool-name">{TOOLS.find((t) => t.id === tool)?.name}</span>
+      {!panels.hideTools && <nav className="tool-bar" aria-label="Tools">
+        {TOOLS.map((t) => (
+          <button
+            key={t.id} className={`icon-btn${tool === t.id ? ' on' : ''}`} aria-label={t.name} aria-pressed={tool === t.id}
+            title={`${t.name}${keyHint(`tool.${t.id}` as ActionId)}: ${t.help}`} onClick={() => setTool(t.id)}
+          >
+            <t.Icon />
+          </button>
+        ))}
+        <div className="rail-sep" />
+        <button className="icon-btn" aria-label="Undo" title="Undo (Ctrl+Z)" disabled={!history.past.length} onClick={() => setHistory(undo)}><I.Undo /></button>
+        <button className="icon-btn" aria-label="Redo" title="Redo (Ctrl+Shift+Z)" disabled={!history.future.length} onClick={() => setHistory(redo)}><I.Redo /></button>
+      </nav>}
+      <Splitter side="top" label="the tools" collapsed={panels.hideTools} onToggle={() => togglePanel('hideTools')} />
+
+      <div className="workspace">
+      {!panels.hideOptions && <div className="tool-options" role="region" aria-label="Tool settings" style={{ width: panels.options }}>
+        <span className="tool-name">{TOOLS.find((t) => t.id === tool)?.name}{tool === 'brush' && <span className="muted" title={preset ? undefined : "You've changed the settings of a preset"}> · {preset?.name ?? 'Custom'}</span>}</span>
         {tool === 'brush' && (
           <div className="presets" role="group" aria-label="Brush presets">
-            {PRESETS.map((p) => (
-              <button key={p.id} className={`btn small${preset?.id === p.id ? ' on' : ''}`} aria-pressed={preset?.id === p.id} title={`${p.name}: ${p.help}`} onClick={() => usePreset(p)}>{p.name}</button>
+            {[...PRESETS, ...savedBrushes].map((p) => (
+              <button key={p.id} className={`brush-btn${preset?.id === p.id ? ' on' : ''}`} aria-label={p.name} aria-pressed={preset?.id === p.id} title={`${p.name}: ${p.help}`} onClick={() => usePreset(p)}><BrushSample brush={p} /></button>
             ))}
-            {!preset && <span className="hint" title="You've changed the settings of a preset">Custom</span>}
+            <button className="brush-btn" aria-label="Edit brush" title="Brush editor: every setting, paper grain, and saving your own brushes" onClick={() => setBrushEditor(true)}><I.Sliders /></button>
           </div>
         )}
         {(tool === 'brush' || tool === 'eraser' || tool === 'line' || tool === 'rect' || tool === 'ellipse') && !(brush.fillShapes && (tool === 'rect' || tool === 'ellipse')) && (
@@ -933,23 +979,8 @@ export default function App() {
           </div>
         )}
       </div>}
-      <Splitter side="top" label="the tool settings" collapsed={panels.hideOptions} onToggle={() => togglePanel('hideOptions')} />
+      <Splitter side="left" label="the tool settings" collapsed={panels.hideOptions} onResize={resizePanel('options')} onToggle={() => togglePanel('hideOptions')} />
 
-      <div className="workspace">
-        {!panels.hideTools && <nav className={`tool-rail${panels.tools >= 100 ? ' wide' : ''}`} aria-label="Tools" style={{ width: panels.tools }}>
-          {TOOLS.map((t) => (
-            <button
-              key={t.id} className={`icon-btn${tool === t.id ? ' on' : ''}`} aria-label={t.name} aria-pressed={tool === t.id}
-              title={`${t.name}${keyHint(`tool.${t.id}` as ActionId)}: ${t.help}`} onClick={() => setTool(t.id)}
-            >
-              <t.Icon />
-            </button>
-          ))}
-          <div className="rail-sep" />
-          <button className="icon-btn" aria-label="Undo" title="Undo (Ctrl+Z)" disabled={!history.past.length} onClick={() => setHistory(undo)}><I.Undo /></button>
-          <button className="icon-btn" aria-label="Redo" title="Redo (Ctrl+Shift+Z)" disabled={!history.future.length} onClick={() => setHistory(redo)}><I.Redo /></button>
-        </nav>}
-        <Splitter side="left" label="the tools" collapsed={panels.hideTools} onResize={resizePanel('tools')} onToggle={() => togglePanel('hideTools')} />
 
         <Stage
           project={project} frame={frame} activeLayerId={activeLayerId} tool={tool} brush={brush} onion={onion$}
@@ -970,16 +1001,8 @@ export default function App() {
           activeLayerId={activeLayerId}
           onion={onion}
           onSelect={setActiveLayerId}
-          onAdd={() => {
-            const r = P.addLayer(project, `Layer ${project.layers.length + 1}`, activeLayerId);
-            apply(() => r.project);
-            setActiveLayerId(r.layerId);
-          }}
-          onAddPaint={() => {
-            const r = P.addLayer(project, `Paint ${project.layers.filter((l) => l.paint).length + 1}`, activeLayerId, { paint: true });
-            apply(() => r.project);
-            setActiveLayerId(r.layerId);
-          }}
+          onAdd={addLineLayer}
+          onAddPaint={addPaintLayer}
           onRemove={(id) => apply((p) => P.removeLayer(p, id))}
           onMove={(id, delta) => apply((p) => P.moveLayer(p, id, delta))}
           onDrop={(id, kind, drop) => apply((p) => (kind === 'group' ? moveGroupToGap(p, id, drop.gap) : P.moveLayerToGap(p, id, drop.gap, drop.group)))}
@@ -1025,10 +1048,18 @@ export default function App() {
         onMoveCel={onMoveCel}
         onUpdateLayer={(id, patch) => apply((p) => P.updateLayer(p, id, patch))}
         onMoveLayerTo={(id, gap, group) => apply((p) => P.moveLayerToGap(p, id, gap, group))}
+        onAddLayer={addLineLayer}
+        onAddPaintLayer={addPaintLayer}
       /></div>}
 
       {toast && <div className="toast" role="status">{toast}</div>}
       {shortcutsOpen && <ShortcutsDialog keymap={keymap} onChange={setKeymap} onClose={() => setShortcutsOpen(false)} />}
+      {brushEditor && (
+        <BrushEditor
+          brush={brush} saved={savedBrushes} onSave={setSavedBrushes}
+          onChange={(patch) => setBrush((b) => ({ ...b, ...patch }))} onClose={() => setBrushEditor(false)}
+        />
+      )}
       {exporting && <ExportDialog project={project} pingPong={playMode === 'pingpong'} onClose={() => setExporting(false)} />}
     </div>
   );

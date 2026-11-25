@@ -1,11 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import type { Point } from './project';
-import { catchUp, matchingPreset, PRESETS, stabilize } from './brushes';
+import { catchUp, matchingPreset, PRESETS, stabilize, validBrush } from './brushes';
 
 describe('brushes', () => {
   it('recognises preset settings', () => {
     expect(matchingPreset(PRESETS[1])?.id).toBe('ink');
     expect(matchingPreset({ ...PRESETS[1], size: 9 })).toBeUndefined();
+  });
+
+  it('tells textured brushes apart by their grain, and finds saved brushes', () => {
+    const chalk = PRESETS.find((p) => p.id === 'chalk')!;
+    expect(matchingPreset(chalk)?.id).toBe('chalk');
+    expect(matchingPreset({ ...chalk, grain: 'canvas' })).toBeUndefined();
+    // No grain and a zero amount are the same brush.
+    expect(matchingPreset({ ...PRESETS[1], grain: 'pencil', grainAmount: 0 })?.id).toBe('ink');
+    const mine = validBrush({ id: 'b1', name: 'Mine', size: 9, opacity: 1, smoothing: 0.5, stabilizer: 0, thinning: 0, softness: 0, grain: 'chalk', grainAmount: 0.3 })!;
+    expect(mine.custom).toBe(true);
+    expect(matchingPreset({ ...mine }, [mine])?.name).toBe('Mine');
+    expect(validBrush({ id: 'x', name: 'Bad', size: '9' })).toBeNull();
+    expect(validBrush({ ...mine, grain: 'glitter' })?.grain).toBe('none');
   });
 
   it('stabilizer trails the pointer and smooths wobble', () => {

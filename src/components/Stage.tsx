@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { scaleAbout, spansBox, strokeBounds, strokesInLasso, translate, unionBoxes, apply, type Box, type Matrix, type Vec } from '../model/geometry';
-import { addStroke, celIndexAt, drawingAt, replaceStrokes, setPaint, transformStrokes, type FontId, type Paint, type Point, type Project, type Stroke } from '../model/project';
+import { addStroke, celIndexAt, drawingAt, replaceStrokes, setPaint, transformStrokes, type FontId, type GrainKind, type Paint, type Point, type Project, type Stroke } from '../model/project';
 import { floodFillSpans } from '../render/fill';
 import { catchUp, stabilize } from '../model/brushes';
 import { groupOf } from '../model/groups';
@@ -36,6 +36,9 @@ export interface BrushSettings {
   thinning: number;
   /** 0–1: blurred edge. */
   softness: number;
+  /** Paper texture through the line, and how strongly (0–1). */
+  grain: GrainKind | 'none';
+  grainAmount: number;
   /** Rectangles and ellipses are filled instead of outlined. */
   fillShapes: boolean;
   /** Fill bucket: a flat colour, or a gradient dragged across the area. */
@@ -805,6 +808,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
         thinning: brush.pressure && !erase ? brush.thinning : 0,
         ...(!erase && brush.opacity < 1 ? { opacity: brush.opacity } : {}),
         ...(!erase && brush.softness > 0 ? { softness: brush.softness } : {}),
+        ...(!erase && brush.grain !== 'none' && brush.grainAmount > 0 ? { grain: { kind: brush.grain, amount: brush.grainAmount } } : {}),
       },
     };
     if (!erase) armQuickShape([first[0], first[1]]);

@@ -43,6 +43,8 @@ interface Props {
   onUpdateLayer: (layerId: string, patch: Partial<Pick<Layer, 'name' | 'visible' | 'locked'>>) => void;
   /** Drag a layer into a gap in the stack, counted bottom to top. */
   onMoveLayerTo: (layerId: string, gap: number, group: string | null) => void;
+  onAddLayer: () => void;
+  onAddPaintLayer: () => void;
 }
 
 interface Press {
@@ -211,6 +213,10 @@ export function Timeline(props: Props) {
     <section className="timeline" aria-label="Timeline">
       <div className="timeline-bar">
         <span className="panel-title" style={{ color: 'var(--text)' }}>Timeline</span>
+        <div className="group">
+          <button className="btn small" disabled={playing} title="Add a line layer above the selected one. Every line stays editable with the Lasso." onClick={props.onAddLayer}><I.Plus /> Layer</button>
+          <button className="btn small" disabled={playing} title="Add a paint layer above the selected one: what you draw on it becomes pixels, like in a paint app" onClick={props.onAddPaintLayer}><I.PaintLayer /> Paint layer</button>
+        </div>
         <span>{active?.reference ? 'Reference image: shows on every frame' : cel ? (cel.drawingId ? 'Drawing holds for' : 'Blank holds for') : 'No drawing here yet'}</span>
         <div className="group">
           {[1, 2, 3, 4].map((h) => (

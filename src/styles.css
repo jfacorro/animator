@@ -89,27 +89,37 @@ input[type='checkbox'] { accent-color: var(--accent); }
 .menu-list button { text-align: left; border: none; background: transparent; padding: 8px 10px; border-radius: 6px; }
 .menu-list button:hover { background: #2f3238; }
 
-/* Tool options */
+/* Tool settings: a column on the left, one setting under another */
 .tool-options {
-  min-height: 44px; display: flex; align-items: center; gap: 20px; padding: 6px 16px; background: var(--panel-2);
-  border-bottom: 1px solid var(--border); color: var(--muted); flex-wrap: wrap;
+  flex-shrink: 0; min-height: 0; display: flex; flex-direction: column; align-items: stretch; gap: 14px; padding: 12px 10px 16px;
+  background: var(--panel-2); color: var(--muted); overflow-y: auto; overflow-x: hidden;
 }
 .tool-options label { display: flex; align-items: center; gap: 8px; }
+.tool-options label:has(> select) { justify-content: space-between; flex-wrap: wrap; row-gap: 4px; }
+.tool-options label > select { min-width: 0; max-width: 100%; }
+/* A slider: name and value on one line, the slider under them, full width. */
+.tool-options label:has(> input[type=range]) { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 4px; }
+.tool-options label > input[type=range] { grid-row: 2; grid-column: 1 / -1; width: 100%; min-width: 0; margin: 0; }
+.tool-options label > .value { grid-row: 1; grid-column: 2; text-align: right; min-width: 0; }
 .tool-options .value { color: var(--text); min-width: 40px; font-variant-numeric: tabular-nums; }
-.tool-name { color: var(--text); font-weight: 600; }
-.swatches { display: flex; align-items: center; gap: 6px; }
+.tool-options .hint { font-size: 12px; line-height: 1.4; }
+.tool-options > .btn { justify-content: center; }
+.tool-options > div { flex-wrap: wrap; }
+.tool-name { color: var(--text); font-weight: 600; font-size: 14px; }
+.swatches { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+/* Tools: a bar under the top bar */
+.tool-bar {
+  display: flex; align-items: center; gap: 2px; padding: 4px 12px; background: var(--panel); flex-wrap: wrap;
+}
+.tool-bar .icon-btn { width: 40px; height: 40px; border-radius: 10px; }
+.tool-bar .rail-sep { width: 1px; height: 24px; background: var(--border); margin: 0 6px; }
 .swatch { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--border-2); padding: 0; }
 .swatch.on { outline: 2px solid var(--accent); outline-offset: 1px; }
 .color-input { width: 26px; height: 26px; padding: 0; border: 1px dashed #6b6f78; border-radius: 50%; background: transparent; overflow: hidden; }
 
 /* Workspace */
 .workspace { flex: 1; min-height: 0; display: flex; }
-.tool-rail {
-  width: 60px; flex-shrink: 0; background: var(--panel); border-right: 1px solid var(--border);
-  display: flex; flex-direction: column; align-items: center; gap: 6px; padding-top: 10px;
-}
-.tool-rail .icon-btn { width: 44px; height: 44px; border-radius: 10px; }
-.rail-sep { width: 32px; height: 1px; background: var(--border); margin: 6px 0; }
 
 .stage { flex: 1; min-width: 0; position: relative; background: var(--stage); display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .stage canvas { display: block; background: #fbfaf7; box-shadow: 0 1px 0 #0006, 0 8px 30px #0004; touch-action: none; }
@@ -149,6 +159,8 @@ input[type='checkbox'] { accent-color: var(--accent); }
 .timeline { height: 220px; flex-shrink: 0; background: var(--panel-2); border-top: 1px solid var(--border); display: flex; flex-direction: column; }
 .timeline-bar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--muted); flex-wrap: wrap; }
 .timeline-bar .group { display: flex; gap: 4px; }
+/* The tip gives way first when the bar is short of room. */
+.timeline-bar > span.hint { flex: 1 1 0; min-width: 0; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .timeline-body { flex: 1; min-height: 0; display: flex; overflow: hidden; }
 .track-names { width: 190px; flex-shrink: 0; border-right: 1px solid var(--border); padding-top: 26px; overflow: hidden; }
 .track-name {
@@ -244,8 +256,6 @@ input[type='checkbox'] { accent-color: var(--accent); }
 .stage canvas.select.nwse { cursor: nwse-resize; }
 .stage canvas.select.nesw { cursor: nesw-resize; }
 .tool-options .hint { color: var(--muted); }
-.tool-rail { overflow-y: auto; }
-.tool-rail .icon-btn { width: 44px; height: 40px; flex-shrink: 0; }
 
 /* Canvas view: zoom, pan, rotate, mirror */
 .canvas-wrap { transform-origin: 50% 50%; will-change: transform; }
@@ -288,9 +298,29 @@ button.file-status.paused {
 }
 
 /* Brushes and palette */
-.tool-options { gap: 16px; }
-.tool-options input[type=range] { width: 96px; }
-.presets { display: flex; align-items: center; gap: 4px; }
+.presets { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+/* In the narrow settings panel the presets share the width and wrap onto as many lines as they need. */
+.tool-options .presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 4px; }
+.brush-btn {
+  height: 34px; min-width: 0; padding: 0; border-radius: 7px; border: 1px solid var(--border-2); background: var(--control);
+  color: var(--text); display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.brush-btn:hover { border-color: #555962; }
+.brush-btn.on { border-color: var(--accent); background: var(--accent-soft); }
+.brush-sample { display: block; pointer-events: none; }
+/* A very narrow panel: everything stacks, one thing per line. */
+.tool-options { container-type: inline-size; }
+@container (max-width: 140px) {
+  .tool-options label:has(> input[type=range]) { grid-template-columns: minmax(0, 1fr); }
+  .tool-options label > .value { grid-row: auto; grid-column: 1; text-align: left; }
+  .tool-options label > input[type=range] { grid-row: auto; order: 1; }
+  .tool-options label, .tool-options .swatches, .tool-options .btn { font-size: 11px; }
+  .tool-options label { flex-wrap: wrap; column-gap: 4px; }
+  .tool-options label:has(> select) { flex-direction: column; align-items: stretch; }
+  .tool-options .swatch { width: 18px; height: 18px; }
+  .tool-options .color-input { width: 22px; height: 22px; }
+  .tool-name { font-size: 13px; overflow-wrap: anywhere; }
+}
 .link-btn { border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline; padding: 0; }
 .link-btn:hover { color: var(--text); }
 .swatches .icon-btn.sm:disabled { opacity: 0.35; }
@@ -341,8 +371,6 @@ button.file-status.paused {
 .layers-wrap .layers { width: 100%; }
 .timeline-wrap { flex-shrink: 0; display: flex; flex-direction: column; min-height: 0; }
 .timeline-wrap .timeline { height: 100%; }
-.tool-rail.wide { flex-direction: row; flex-wrap: wrap; justify-content: center; align-content: flex-start; padding: 10px 6px 0; }
-.tool-rail.wide .rail-sep { width: 100%; }
 .splitter { position: relative; flex-shrink: 0; background: var(--border); touch-action: none; z-index: 2; }
 .splitter.vertical { width: 4px; cursor: col-resize; }
 .splitter.horizontal { height: 4px; cursor: row-resize; }
@@ -434,11 +462,13 @@ button.file-status.paused {
 
 /* Phones and small windows: one row for each bar, scrolling sideways instead of wrapping. */
 @media (max-width: 900px), (max-height: 520px) {
-  .topbar, .tool-options { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-  .topbar::-webkit-scrollbar, .tool-options::-webkit-scrollbar { display: none; }
-  .topbar > *, .tool-options > * { flex-shrink: 0; }
+  .topbar, .tool-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .topbar::-webkit-scrollbar, .tool-bar::-webkit-scrollbar { display: none; }
+  .topbar > *, .tool-bar > * { flex-shrink: 0; }
   .topbar { min-height: 0; gap: 8px; padding: 4px 8px; }
-  .tool-options { min-height: 0; gap: 12px; padding: 4px 10px; }
+  .tool-bar { padding: 2px 8px; }
+  .tool-bar .icon-btn { width: 36px; height: 36px; }
+  .tool-options { gap: 10px; padding: 8px 10px; }
   .tool-options .hint, .file-status, .brand-name { display: none; }
   .topbar .spacer { flex: 0 0 4px; }
   .project-name { width: 130px; }
@@ -448,3 +478,13 @@ button.file-status.paused {
   .track-names { width: 110px; }
   .view-controls { right: 6px; bottom: 6px; max-width: calc(100% - 12px); overflow-x: auto; }
 }
+
+/* Brush editor */
+.dialog.brush-editor { max-width: 720px; }
+.brush-preview { display: block; max-width: 100%; border-radius: 8px; border: 1px solid var(--border); }
+.brush-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; align-items: center; }
+.saved-brush { display: inline-flex; align-items: center; gap: 6px; padding: 2px 2px 2px 10px; border: 1px solid var(--border-2); border-radius: 8px; }
+.row-input { display: inline-flex; align-items: center; gap: 8px; }
+.row-input input[type=range] { width: 140px; }
+.brush-editor .dialog-foot input[type=text] { flex: 1; min-width: 0; max-width: 220px; }
+.tool-name .muted { font-weight: 400; }
