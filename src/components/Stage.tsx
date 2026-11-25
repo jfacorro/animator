@@ -147,6 +147,8 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   const [view, setView] = useState<View>(FIT_VIEW);
   const [navigating, setNavigating] = useState(false);
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
+  /** Lasso: what the pointer is over, for its cursor (a corner to resize, inside to move, else draw a loop). */
+  const [selHover, setSelHover] = useState<'move' | 'nwse' | 'nesw' | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [, setOverlayTick] = useState(0);
   const [stageSize, setStageSize] = useState({ w: 800, h: 600 });
@@ -741,6 +743,18 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       setCursor({ x: cx, y: cy });
     }
     const g = gestureRef.current;
+    if (tool === 'select' && !g) {
+      const box = selectionBox();
+      let over: typeof selHover = null;
+      if (box) {
+        const [x, y] = toPoint(e, false);
+        const r = 12 / vs;
+        const corners: Vec[] = [[box.x0, box.y0], [box.x1, box.y0], [box.x1, box.y1], [box.x0, box.y1]];
+        const hit = corners.findIndex(([cx, cy]) => Math.abs(cx - x) <= r && Math.abs(cy - y) <= r);
+        over = hit === 0 || hit === 2 ? 'nwse' : hit >= 0 ? 'nesw' : x >= box.x0 && x <= box.x1 && y >= box.y0 && y <= box.y1 ? 'move' : null;
+      }
+      if (over !== selHover) setSelHover(over);
+    }
     if (!g || g.pointerId !== e.pointerId) return;
     const [x, y] = toPoint(e, false);
 
@@ -936,7 +950,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   const camActive = tool === 'camera';
   const showBrushCursor = (tool === 'brush' || tool === 'eraser') && cursor && !blocked && !panKey && !navigating;
   const cursorSize = (tool === 'eraser' ? brush.eraserSize : brush.size) * scale;
-  const canvasClass = tool === 'camera' ? 'camera' : tool === 'eyedropper' ? 'pick' : blocked && EDITS.includes(tool) ? 'blocked' : tool === 'fill' ? 'fill' : tool === 'text' ? 'text' : tool === 'select' ? 'select' : 'draw';
+  const canvasClass = tool === 'camera' ? 'camera' : tool === 'eyedropper' ? 'pick' : blocked && EDITS.includes(tool) ? 'blocked' : tool === 'fill' ? 'fill' : tool === 'text' ? 'text' : tool === 'select' ? `select${selHover ? ` ${selHover}` : ''}` : 'draw';
   const hs = 10 / vs; // handle size in project px
 
   return (
