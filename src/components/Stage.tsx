@@ -9,6 +9,7 @@ import { bakePaint, composeFrame, mulMatrix, PAPER, paintReady, fontCss, LINE_HE
 import { placeReference, rulerStep, snapToGuides, symmetricStrokes, type GuideAxis, type Symmetry } from '../model/aids';
 import { addGuide, moveGuide, removeGuide } from '../model/aids';
 import { tapDown, tapMove, tapUp, type Taps } from '../model/taps';
+import { adjustShape, HOLD_MS, recognize, SHAPE_NAMES, shapePoints, type QuickShape } from '../model/quickshape';
 import { FIT_VIEW, flipAt, pinch, rotateAt, screenToLocal, snapRotation, viewTransform, zoomAt, type View } from '../model/view';
 import * as I from './Icons';
 import { actionFor, displayKey, keyOf, type Keymap } from '../keys';
@@ -84,7 +85,13 @@ type Nav =
   | { type: 'pinch'; ids: [number, number]; start: [Vec, Vec]; view: View };
 
 type Gesture =
-  | { type: 'stroke'; pointerId: number; stroke: Stroke; tip: Point; pointer: Point }
+  | {
+      type: 'stroke'; pointerId: number; stroke: Stroke; tip: Point; pointer: Point;
+      /** Where the pen came to rest, and the timer that snaps the stroke into a QuickShape. */
+      hold?: { at: Vec; timer: number };
+      /** Snapped: the shape, and where the pen was when it snapped. */
+      quick?: { shape: QuickShape; from: Vec; pressure: number };
+    }
   | { type: 'shape'; pointerId: number; stroke: Stroke; start: Vec }
   | { type: 'gradient'; pointerId: number; stroke: Stroke; start: Vec; moved: boolean }
   | { type: 'lasso'; pointerId: number; points: Vec[] }
@@ -679,7 +686,29 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
         ...(!erase && brush.softness > 0 ? { softness: brush.softness } : {}),
       },
     };
+    if (!erase) armQuickShape([first[0], first[1]]);
     schedulePaint();
+  };
+
+  // QuickShape: hold the pen still at the end of a stroke and it snaps into a clean shape.
+  const armQuickShape = (at: Vec) => {
+    const g = gestureRef.current;
+    if (!g || g.type !== 'stroke' || g.quick) return;
+    if (g.hold) clearTimeout(g.hold.timer);
+    const timer = window.setTimeout(() => {
+      const cur = gestureRef.current;
+      if (cur !== g || g.quick) return;
+      const shape = recognize(g.stroke.points);
+      if (!shape) return;
+      const pts = g.stroke.points;
+      const pressure = g.stroke.simulatePressure ? 0.5 : pts.reduce((sum, p) => sum + p[2], 0) / pts.length;
+      g.quick = { shape, from: [g.pointer[0], g.pointer[1]], pressure };
+      // Draw it with an even width, like the shape tools.
+      g.stroke = { ...g.stroke, simulatePressure: false, points: shapePoints(shape, pressure) };
+      flash(`${SHAPE_NAMES[shape.kind]}: keep holding and drag to adjust, or lift to finish`);
+      schedulePaint();
+    }, HOLD_MS);
+    g.hold = { at, timer };
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -698,9 +727,16 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       const raw = events.length ? events.map((ev) => toPoint(ev, pen)) : [toPoint(e, pen)];
       // The eraser isn't stabilized: it should go exactly where you point.
       const amount = g.stroke.erase ? 0 : brush.stabilizer;
-      const pts = raw.map((pt) => (g.tip = amount ? stabilize(g.tip, pt, amount) : pt));
       g.pointer = raw.at(-1)!;
-      g.stroke = { ...g.stroke, points: [...g.stroke.points, ...pts] };
+      if (g.quick) {
+        const shape = adjustShape(g.quick.shape, g.quick.from, [g.pointer[0], g.pointer[1]]);
+        g.stroke = { ...g.stroke, points: shapePoints(shape, g.quick.pressure) };
+      } else {
+        const pts = raw.map((pt) => (g.tip = amount ? stabilize(g.tip, pt, amount) : pt));
+        g.stroke = { ...g.stroke, points: [...g.stroke.points, ...pts] };
+        // Moving on restarts the wait for a hold.
+        if (g.hold && Math.hypot(g.pointer[0] - g.hold.at[0], g.pointer[1] - g.hold.at[1]) * vs > 4) armQuickShape([g.pointer[0], g.pointer[1]]);
+      }
     } else if (g.type === 'shape') {
       let [ex, ey] = [x, y];
       const [sx, sy] = g.start;
@@ -759,7 +795,8 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     cancelAnimationFrame(rafRef.current);
 
     if (g.type === 'stroke') {
-      const tail = catchUp(g.tip, g.pointer);
+      if (g.hold) clearTimeout(g.hold.timer);
+      const tail = g.quick ? [] : catchUp(g.tip, g.pointer);
       const stroke = tail.length ? { ...g.stroke, points: [...g.stroke.points, ...tail] } : g.stroke;
       commitStrokes(symmetricStrokes(stroke, symmetry, project.width, project.height));
     } else if (g.type === 'shape') {
