@@ -52,5 +52,6 @@ export const Diamond = () => <Icon size={12} fill="currentColor"><path d="M12 3l
 export const Folder = () => <Icon size={16}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></Icon>;
 export const Ruler = () => <Icon size={16}><path d="M3 15L15 3l6 6L9 21z" /><path d="M7 11l2 2M10 8l2 2M13 5l2 2" /></Icon>;
 export const Image = () => <Icon size={16}><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M21 17l-5-5-9 8" /></Icon>;
+export const PaintLayer = () => <Icon size={16}><path d="M4 20c3 0 5-2 5-4a3 3 0 0 0-5 0c0 1 .5 2 0 4z" /><path d="M9 14l10-10 1 1-10 10" /></Icon>;
 export const Text = () => <Icon><path d="M5 6V4h14v2M12 4v16M9 20h6" /></Icon>;
 export const Keyboard = () => <Icon size={16}><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" /></Icon>;

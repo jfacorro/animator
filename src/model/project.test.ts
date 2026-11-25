@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   addLayer,
+  isBlank,
+  setPaint,
   addStroke,
   deleteStrokes,
   duplicateStrokes,
@@ -255,4 +257,36 @@ it('stretches the scene to the sound and the camera', () => {
   const p = createProject(); // 2 frames at 12 fps
   expect(sceneLength({ ...p, audio: { name: 'a', data: '', start: 3, volume: 1, duration: 1.5 } })).toBe(21);
   expect(sceneLength({ ...p, camera: [{ frame: 30, x: 0, y: 0, zoom: 1, rotation: 0 }] })).toBe(31);
+});
+
+describe('paint layers', () => {
+  const pix = { data: 'data:image/png;base64,AAAA', x: 10, y: 20, width: 5, height: 6 };
+
+  it('adds a paint layer and stores its pixels on the drawing', () => {
+    const r = addLayer(createProject(), 'Paint 1', undefined, { paint: true });
+    const layer = r.project.layers.find((l) => l.id === r.layerId)!;
+    expect(layer.paint).toBe(true);
+    const p = setPaint(r.project, r.layerId, 0, pix);
+    const d = drawingAt(p, p.layers.find((l) => l.id === r.layerId)!, 0)!;
+    expect(d.paint).toEqual(pix);
+    expect(d.strokes).toEqual([]);
+    expect(isBlank(d)).toBe(false);
+  });
+
+  it('duplicates and clears paint like strokes', () => {
+    const r = addLayer(createProject(), 'Paint 1', undefined, { paint: true });
+    let p = setPaint(r.project, r.layerId, 0, pix);
+    p = duplicateCelAt(p, r.layerId, 0).project;
+    const layer = () => p.layers.find((l) => l.id === r.layerId)!;
+    expect(drawingAt(p, layer(), 2)!.paint).toEqual(pix);
+    p = clearCelAt(p, r.layerId, 0);
+    expect(isBlank(drawingAt(p, layer(), 0))).toBe(true);
+    expect(drawingAt(p, layer(), 2)!.paint).toEqual(pix);
+  });
+
+  it('erasing everything leaves a blank drawing', () => {
+    const r = addLayer(createProject(), 'Paint 1', undefined, { paint: true });
+    const p = setPaint(setPaint(r.project, r.layerId, 0, pix), r.layerId, 0, null);
+    expect(isBlank(drawingAt(p, p.layers.find((l) => l.id === r.layerId)!, 0))).toBe(true);
+  });
 });

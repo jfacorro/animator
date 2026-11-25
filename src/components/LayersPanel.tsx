@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { drawingAt, layerLength, type Layer, type LayerGroup, type Project } from '../model/project';
+import { drawingAt, isBlank, layerLength, type Layer, type LayerGroup, type Project } from '../model/project';
 import { BLEND_MODES } from '../model/groups';
 import { drawingBitmap, loadedImage, onImageLoad, PAPER } from '../render/render';
 import * as I from './Icons';
@@ -26,6 +26,8 @@ interface Props {
   onion: OnionState;
   onSelect: (id: string) => void;
   onAdd: () => void;
+  /** Add a paint layer: drawing on it makes pixels, like a paint app. */
+  onAddPaint: () => void;
   onRemove: (id: string) => void;
   onMove: (id: string, delta: number) => void;
   /** Drag a layer or group to a spot in the stack. */
@@ -93,7 +95,8 @@ export function LayersPanel(props: Props) {
         <span className="panel-title">Layers</span>
         <span className="head-btns">
           <button className="icon-btn sm" aria-label="Add reference image" title="Add a picture to trace over. It shows on every frame, is never exported, and can't be drawn on." onClick={props.onAddReference}><I.Image /></button>
-          <button className="icon-btn sm" aria-label="Add layer" title="Add a layer above the selected one" onClick={props.onAdd}><I.Plus /></button>
+          <button className="icon-btn sm" aria-label="Add paint layer" title="Add a paint layer above the selected one. What you draw on it becomes pixels, like in a paint app: good for colour, shading and texture, and the eraser really removes paint. Lines can't be selected or moved one by one." onClick={props.onAddPaint}><I.PaintLayer /></button>
+          <button className="icon-btn sm" aria-label="Add layer" title="Add a line layer above the selected one. Every line stays editable: select, move and resize it with the Lasso." onClick={props.onAdd}><I.Plus /></button>
         </span>
       </div>
       <div className="layer-list">{rows}</div>
@@ -225,7 +228,7 @@ function LayerRow({ layer, project, frame, activeLayerId, selectedGroupId, onSel
         ) : (
           <div className="layer-name" title="Double-click to rename" onDoubleClick={() => setRenaming(true)}>{layer.name}</div>
         )}
-        <div className="layer-meta">{layer.blend && layer.blend !== 'normal' ? `${BLEND_MODES.find((m) => m.id === layer.blend)?.name} · ` : ''}{meta}</div>
+        <div className="layer-meta">{layer.paint ? 'Paint · ' : ''}{layer.blend && layer.blend !== 'normal' ? `${BLEND_MODES.find((m) => m.id === layer.blend)?.name} · ` : ''}{meta}</div>
       </div>
       <button
         className="icon-btn sm" aria-label={layer.locked ? `Unlock ${layer.name}` : `Lock ${layer.name}`}
@@ -255,7 +258,7 @@ function Thumb({ project, layer, frame }: { project: Project; layer: Layer; fram
       const img = loadedImage(ref$.data);
       const k = w / project.width;
       if (img) ctx.drawImage(img, ref$.x * k, ref$.y * (h / project.height), ref$.width * k, ref$.height * (h / project.height));
-    } else if (drawing?.strokes.length) {
+    } else if (drawing && !isBlank(drawing)) {
       const pic = drawingBitmap(drawing, project.width, project.height);
       const k = w / project.width;
       const kh = h / project.height;

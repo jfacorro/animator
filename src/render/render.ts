@@ -1,7 +1,7 @@
 import { getStroke } from 'perfect-freehand';
 import { cameraAt, cameraMatrix, hasCamera } from '../model/camera';
 import { compositeOp, sceneUnits } from '../model/groups';
-import { celIndexAt, type Drawing, type FontId, type Layer, type Project, type Stroke } from '../model/project';
+import { celIndexAt, isBlank, type Drawing, type FontId, type Layer, type Paint, type Project, type Stroke } from '../model/project';
 
 export const PAPER = '#fbfaf7';
 export const ONION_BEFORE = '#e5534b';
@@ -222,6 +222,11 @@ export function drawingBox(d: Drawing, w: number, h: number): { x: number; y: nu
     if (px + pad > x1) x1 = px + pad;
     if (py + pad > y1) y1 = py + pad;
   };
+  if (d.paint) {
+    const p = d.paint;
+    add(undefined, p.x, p.y, 0);
+    add(undefined, p.x + p.width, p.y + p.height, 0);
+  }
   for (const s of d.strokes) {
     if (s.erase) continue; // erasing only takes paint away
     const m = s.matrix;
@@ -343,6 +348,9 @@ function cached(key: string, build: () => Pic | null): Pic | null {
 
 /** The drawing rendered on its own, or null when it shows nothing. */
 export function drawingBitmap(d: Drawing, w: number, h: number): Pic | null {
+  // Paint still decoding: show nothing for now (and don't remember that), onImageLoad repaints.
+  const sheet = d.paint ? paintSource(d.paint) : null;
+  if (d.paint && !sheet) return null;
   return cached(cacheKey(d, 'plain', w, h), () => {
     const box = drawingBox(d, w, h);
     if (!box) return null;
@@ -354,6 +362,7 @@ export function drawingBitmap(d: Drawing, w: number, h: number): Pic | null {
     const c = bitmapCanvas(cw, ch);
     const ctx = c.getContext('2d')!;
     ctx.translate(-box.x, -box.y);
+    if (sheet && d.paint) ctx.drawImage(sheet, d.paint.x, d.paint.y);
     paintDrawing(ctx, d.strokes);
     return { src: c, x: box.x, y: box.y };
   });
@@ -392,6 +401,65 @@ export function loadedImage(data: string): HTMLImageElement | null {
     images.set(data, img);
   }
   return img.complete && img.naturalWidth ? img : null;
+}
+
+// Paint drawings: pixels stored as PNG data URLs. A sheet just baked here is
+// kept as its canvas, so drawing on a paint layer never waits for a decode.
+const baked = new Map<string, HTMLCanvasElement>();
+const BAKED_LIMIT = 8;
+
+/** Something to draw a paint drawing's pixels from, or null while its image decodes. */
+export function paintSource(p: Paint): CanvasImageSource | null {
+  return baked.get(p.data) ?? loadedImage(p.data);
+}
+
+/** Wait until every paint drawing can be drawn (before exporting, which draws frames straight away). */
+export async function paintReady(project: Project): Promise<void> {
+  const waits: Promise<unknown>[] = [];
+  for (const d of Object.values(project.drawings)) {
+    if (!d.paint || paintSource(d.paint)) continue;
+    loadedImage(d.paint.data); // starts decoding
+    const img = images.get(d.paint.data);
+    if (img) waits.push(img.decode().catch(() => undefined));
+  }
+  await Promise.all(waits);
+}
+
+/**
+ * Paint `strokes` onto a paint drawing's pixels (`base`) and return the new pixels,
+ * cropped to where there is paint, or null when nothing is left. Fills go under
+ * what's already there, like on stroke layers; the eraser really removes paint.
+ */
+export function bakePaint(base: Paint | undefined, strokes: Stroke[], w: number, h: number): Paint | null {
+  const c = makeCanvas(w, h);
+  const ctx = c.getContext('2d', { willReadFrequently: true })!;
+  if (base) {
+    const src = paintSource(base);
+    if (!src) throw new Error('The drawing is still loading. Try again in a moment.');
+    ctx.drawImage(src, base.x, base.y);
+  }
+  paintDrawing(ctx, strokes);
+  // Crop to the painted area.
+  const px = ctx.getImageData(0, 0, w, h).data;
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y++) {
+    const row = y * w * 4;
+    for (let x = 0; x < w; x++) {
+      if (px[row + x * 4 + 3] === 0) continue;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      y1 = y;
+    }
+  }
+  if (x1 < 0) return null;
+  const cw = x1 - x0 + 1, ch = y1 - y0 + 1;
+  const crop = makeCanvas(cw, ch);
+  crop.getContext('2d')!.drawImage(c, x0, y0, cw, ch, 0, 0, cw, ch);
+  const data = crop.toDataURL('image/png');
+  baked.set(data, crop);
+  while (baked.size > BAKED_LIMIT) baked.delete(baked.keys().next().value!);
+  return { data, x: x0, y: y0, width: cw, height: ch };
 }
 
 export interface OnionOptions {
@@ -476,7 +544,7 @@ export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, fr
       for (const s of opts.live.strokes) paintStroke(sctx, s, true);
       return { src: sctx.canvas, x: 0, y: 0 }; // given back after the frame
     }
-    return d && d.strokes.length ? drawingBitmap(d, w, h) : null;
+    return d && !isBlank(d) ? drawingBitmap(d, w, h) : null;
   };
 
   const onionSkins = (target: CanvasRenderingContext2D, layer: Layer, locked: boolean) => {
@@ -488,7 +556,7 @@ export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, fr
     const draw = (index: number, color: string, step: number, count: number) => {
       const cel = layer.cels[index];
       const d = cel?.drawingId ? project.drawings[cel.drawingId] : null;
-      if (!d || !d.strokes.length) return;
+      if (!d || isBlank(d)) return;
       target.globalAlpha = (onion.opacity ?? 0.45) * (1 - (step - 1) / (count + 0.5));
       target.globalCompositeOperation = 'source-over';
       const t = tintedBitmap(d, color, w, h);

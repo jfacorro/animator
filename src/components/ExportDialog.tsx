@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { exportGif } from '../export/gif';
 import { canExportMp4, exportMp4, exportPngSequence } from '../export/video';
 import { sceneLength, type Project } from '../model/project';
-import { composeFrame } from '../render/render';
+import { composeFrame, paintReady } from '../render/render';
 import { downloadBlob, safeFileName } from '../storage';
 import * as I from './Icons';
 
@@ -70,6 +70,8 @@ export function ExportDialog({ project, onClose }: Props) {
     setProgress(0);
     const onProgress = (d: number, t: number) => setProgress(d / t);
     try {
+      // Paint layers' pixels must be decoded before frames are drawn.
+      await paintReady(project);
       let blob: Blob;
       if (format === 'mp4') {
         const r = await exportMp4(project, { scale, includeHidden, sound, onProgress });
