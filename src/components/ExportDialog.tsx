@@ -9,19 +9,22 @@ import * as I from './Icons';
 interface Props {
   project: Project;
   onClose: () => void;
+  /** The frame shown now: a PSD holds this frame's layers. */
+  frame?: number;
   /** Playback is set to ping-pong: GIFs play forwards then backwards too. */
   pingPong?: boolean;
 }
 
 const SIZES = [0.5, 0.75, 1, 1.5, 2];
 
-type Format = 'gif' | 'mp4' | 'png';
+type Format = 'gif' | 'mp4' | 'png' | 'psd';
 const FORMATS: { id: Format; name: string; note: string; help: string }[] = [
   { id: 'gif', name: 'GIF', note: 'for sharing', help: 'Animated GIF: plays anywhere, loops, no sound' },
   { id: 'mp4', name: 'MP4', note: 'video with sound', help: 'MP4 video: small, sharp, and includes the sound track' },
   { id: 'png', name: 'PNG', note: 'image sequence', help: 'One PNG image per frame, in a zip file: for video editors and compositing' },
+  { id: 'psd', name: 'PSD', note: 'this frame, layered', help: 'Photoshop file of the frame you are on, with every layer kept apart: for Photoshop, Procreate, Krita and others' },
 ];
-const EXT: Record<Format, string> = { gif: 'gif', mp4: 'mp4', png: 'zip' };
+const EXT: Record<Format, string> = { gif: 'gif', mp4: 'mp4', png: 'zip', psd: 'psd' };
 
 /** The export as a file for the share sheet (iPad: Photos, Files, Messages…), or null where sharing files isn't supported. */
 function shareFile(blob: Blob, name: string): File | null {
@@ -30,7 +33,7 @@ function shareFile(blob: Blob, name: string): File | null {
   return navigator.canShare({ files: [file] }) ? file : null;
 }
 
-export function ExportDialog({ project, onClose, pingPong = false }: Props) {
+export function ExportDialog({ project, frame: current = 0, onClose, pingPong = false }: Props) {
   const [format, setFormat] = useState<Format>('gif');
   const [scale, setScale] = useState(0.75);
   const [sound, setSound] = useState(true);
@@ -47,16 +50,20 @@ export function ExportDialog({ project, onClose, pingPong = false }: Props) {
 
   // Loop a live preview until the export is ready (a PNG sequence keeps previewing).
   useEffect(() => {
-    if (result && format !== 'png') return;
+    if (result && format !== 'png' && format !== 'psd') return;
     const ctx = previewRef.current?.getContext('2d');
     if (!ctx) return;
+    if (format === 'psd') {
+      composeFrame(ctx, project, current, { paper, includeHidden, camera: true });
+      return;
+    }
     let f = 0;
     const id = window.setInterval(() => {
       composeFrame(ctx, project, f, { paper: paper || format === 'mp4', includeHidden, camera: true });
       f = (f + 1) % frames;
     }, 1000 / project.fps);
     return () => window.clearInterval(id);
-  }, [project, paper, includeHidden, frames, result, format]);
+  }, [project, paper, includeHidden, frames, result, format, current]);
 
   useEffect(() => () => { if (result) URL.revokeObjectURL(result.url); }, [result]);
 
@@ -79,6 +86,9 @@ export function ExportDialog({ project, onClose, pingPong = false }: Props) {
         const r = await exportMp4(project, { scale, includeHidden, sound, onProgress });
         blob = r.blob;
         if (r.soundNote) setNote(r.soundNote);
+      } else if (format === 'psd') {
+        const { exportPsd } = await import('../export/psd');
+        blob = exportPsd(project, current, { scale, paper, includeHidden });
       } else if (format === 'png') {
         blob = await exportPngSequence(project, safeFileName(project.name), { scale, paper, includeHidden, onProgress });
       } else {
@@ -94,7 +104,7 @@ export function ExportDialog({ project, onClose, pingPong = false }: Props) {
 
   const reset = () => setResult(null);
   const fileName = `${safeFileName(project.name)}.${EXT[format]}`;
-  const what = format === 'mp4' ? 'video' : format === 'png' ? 'images' : 'GIF';
+  const what = format === 'mp4' ? 'video' : format === 'png' ? 'images' : format === 'psd' ? 'PSD' : 'GIF';
   const size = (b: number) => (b > 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` : `${(b / 1024).toFixed(0)} KB`);
 
   return (
@@ -114,7 +124,7 @@ export function ExportDialog({ project, onClose, pingPong = false }: Props) {
             <span className="muted">
               {result
                 ? `${fileName} · ${size(result.blob.size)}${format === 'png' ? ` · ${frames} PNG images` : ''}`
-                : `${frames} frames at ${project.fps} fps = ${seconds} s${format === 'gif' ? (pingPong ? ', forwards then backwards, looping' : ', looping') : ''}`}
+                : format === 'psd' ? `Frame ${current + 1}, with ${project.layers.filter((l) => !l.reference && (l.visible || includeHidden)).length} layers` : `${frames} frames at ${project.fps} fps = ${seconds} s${format === 'gif' ? (pingPong ? ', forwards then backwards, looping' : ', looping') : ''}`}
             </span>
           </div>
           <div className="dialog-form">
