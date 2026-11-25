@@ -19,6 +19,15 @@ npm test         # unit tests for the timeline/layer model
 npm run build    # static site in dist/
 ```
 
+## Online
+
+Every merge to `main` publishes the app to GitHub Pages
+(https://jfacorro.github.io/animator/) through `.github/workflows/pages.yml`.
+Once opened there, it also opens without a connection, and *Add to Home Screen*
+on an iPhone or iPad gives a full-screen app. Drawings are kept in the browser
+you use them in: to move an animation between devices or browsers, use
+*Save to file* and *Open from file*.
+
 ## How it works
 
 - **Layers and timing.** A scene is a stack of layers. Each layer is a list of
@@ -186,8 +195,8 @@ Next, in this order:
 
 1. ~~More export formats: MP4 video with sound, PNG image sequences~~ (done)
 2. ~~Faster with long animations and many layers~~ (done)
-3. **Ready for iPad and Apple Pencil** (this version)
-4. Paint layers: pixel layers for painting and real erasing, next to the stroke layers
-5. Published online, so it works without a local copy
+3. ~~Ready for iPad and Apple Pencil~~ (done)
+4. **Published online, so it works without a local copy** (this version)
+5. Paint layers: pixel layers for painting and real erasing, next to the stroke layers
 
 Importing photos of paper drawings is parked.
