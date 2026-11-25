@@ -58,6 +58,11 @@ you use them in: to move an animation between devices or browsers, use
   bends as pixels). The **Liquify** tool (W) pushes lines or paint along with
   the pointer, like a finger in wet paint, for nudging a pose or squash and
   stretch; set how wide an area moves with Size.
+- **Adjust colours.** *Adjust colours…* in the ⋯ menu changes the hue,
+  saturation and brightness of the current drawing (or only the selected
+  lines), or of every drawing in the layer, with a live preview. **Recolour**
+  turns one colour of the drawing into another, keeping its shading; raise
+  *Tolerance* to take nearby shades along. Both work on lines and paint.
 - **QuickShape.** Draw a rough line, circle, ellipse or box with the brush and
   keep the pen still at the end for half a second: it snaps into a clean
   shape. Keep holding and drag to adjust it (a line's end follows the pen, a
