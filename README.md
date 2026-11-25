@@ -148,6 +148,10 @@ you use them in: to move an animation between devices or browsers, use
   Sizes go from half to double the canvas size. *Open PSD…* in the ⋯ menu
   goes the other way: a Photoshop file becomes a new animation with each of
   its layers as a paint layer.
+- **Timelapse.** While you draw, a small picture of the frame you're on is
+  taken after each change and kept in this browser, per animation.
+  *Timelapse…* in the ⋯ menu replays them, at a speed you choose, and
+  *Export MP4* saves the replay as a video. *Clear* starts the recording again.
 - **Speed.** Each drawing is rendered once to a bitmap that covers only the
   area it touches; bitmaps are kept within a memory budget and their canvases
   reused. Frames that show the same drawings as the last one (held drawings,

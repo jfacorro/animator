@@ -198,3 +198,41 @@ export async function exportPngSequence(project: Project, base: string, opts: Fr
   opts.onProgress?.(total + 1, total + 1);
   return new Blob([zip as BlobPart], { type: 'application/zip' });
 }
+
+/** A silent MP4 from `count` pictures of w × h (made even), drawn one by one by `draw`. */
+export async function encodeVideo(count: number, width: number, height: number, fps: number, draw: (i: number) => Promise<CanvasImageSource> | CanvasImageSource, onProgress?: (done: number, total: number) => void): Promise<Blob> {
+  const w = even(width), h = even(height);
+  const video = await pickVideoCodec(w, h, fps);
+  if (!video) throw new Error('This browser can’t make videos. Try Chrome or Edge.');
+  const muxer = new Muxer({
+    target: new ArrayBufferTarget(),
+    video: { codec: video.muxer, width: w, height: h, frameRate: fps },
+    fastStart: 'in-memory',
+    firstTimestampBehavior: 'offset',
+  });
+  let failure: unknown = null;
+  const encoder = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: (e) => { failure = e; } });
+  encoder.configure({ codec: video.encoder, width: w, height: h, framerate: fps, bitrate: bitrateFor(w, h, fps) });
+  const out = document.createElement('canvas');
+  out.width = w;
+  out.height = h;
+  const ctx = out.getContext('2d')!;
+  const frameUs = 1_000_000 / fps;
+  for (let i = 0; i < count; i++) {
+    if (failure) break;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(await draw(i), 0, 0, w, h);
+    const frame = new VideoFrame(out, { timestamp: Math.round(i * frameUs), duration: Math.round(frameUs) });
+    encoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
+    frame.close();
+    onProgress?.(i + 1, count);
+    while (encoder.encodeQueueSize > 8) await new Promise((r) => setTimeout(r, 5));
+    if (i % 4 === 3) await nextTick();
+  }
+  await encoder.flush();
+  encoder.close();
+  if (failure) throw failure instanceof Error ? failure : new Error('The video encoder stopped.');
+  muxer.finalize();
+  return new Blob([muxer.target.buffer], { type: 'video/mp4' });
+}
