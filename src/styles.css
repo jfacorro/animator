@@ -95,12 +95,12 @@ input[type='checkbox'] { accent-color: var(--accent); }
   background: var(--panel-2); color: var(--muted); overflow-y: auto; overflow-x: hidden;
 }
 .tool-options label { display: flex; align-items: center; gap: 8px; }
-.tool-options label:has(> select) { justify-content: space-between; }
-.tool-options label > select { min-width: 0; max-width: 62%; }
+.tool-options label:has(> select) { justify-content: space-between; flex-wrap: wrap; row-gap: 4px; }
+.tool-options label > select { min-width: 0; max-width: 100%; }
 /* A slider: name and value on one line, the slider under them, full width. */
-.tool-options label:has(> input[type=range]) { display: grid; grid-template-columns: 1fr auto; row-gap: 2px; }
-.tool-options label > input[type=range] { grid-row: 2; grid-column: 1 / -1; width: 100%; margin: 0; }
-.tool-options label > .value { grid-row: 1; grid-column: 2; text-align: right; }
+.tool-options label:has(> input[type=range]) { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 4px; }
+.tool-options label > input[type=range] { grid-row: 2; grid-column: 1 / -1; width: 100%; min-width: 0; margin: 0; }
+.tool-options label > .value { grid-row: 1; grid-column: 2; text-align: right; min-width: 0; }
 .tool-options .value { color: var(--text); min-width: 40px; font-variant-numeric: tabular-nums; }
 .tool-options .hint { font-size: 12px; line-height: 1.4; }
 .tool-options > .btn { justify-content: center; }
@@ -299,6 +299,10 @@ button.file-status.paused {
 
 /* Brushes and palette */
 .presets { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+/* In the narrow settings panel the presets share the width and wrap onto as many lines as they need. */
+.tool-options .presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); }
+.tool-options .presets .btn { min-width: 0; padding: 0 6px; justify-content: center; overflow: hidden; text-overflow: ellipsis; }
+.tool-options .presets .hint { grid-column: 1 / -1; }
 .link-btn { border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline; padding: 0; }
 .link-btn:hover { color: var(--text); }
 .swatches .icon-btn.sm:disabled { opacity: 0.35; }

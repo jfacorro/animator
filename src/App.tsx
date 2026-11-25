@@ -74,7 +74,7 @@ const DEFAULT_PANELS: Panels = { options: 230, layers: 280, timeline: 220, hideT
 /** A phone, or a small window: start with the layers panel hidden and a short timeline. */
 const smallScreen = () => typeof window !== 'undefined' && (window.innerWidth < 760 || window.innerHeight < 520);
 const COMPACT_PANELS: Partial<Panels> = { options: 170, layers: 220, timeline: 110, hideLayers: true };
-const PANEL_LIMITS = { options: [150, 420], layers: [200, 560], timeline: [110, 640] } as const;
+const PANEL_LIMITS = { options: [130, 420], layers: [200, 560], timeline: [110, 640] } as const;
 const clampPanel = (k: keyof typeof PANEL_LIMITS, v: number) => Math.round(Math.min(PANEL_LIMITS[k][1], Math.max(PANEL_LIMITS[k][0], v)));
 const MAX_PALETTE = 24;
 
