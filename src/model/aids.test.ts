@@ -73,3 +73,21 @@ describe('reference images', () => {
     expect(removeLayer(project, project.layers[0].id).layers).toHaveLength(1);
   });
 });
+
+describe('perspective', () => {
+  it('snaps a line towards a vanishing point, upright or level', async () => {
+    const { snapPerspective } = await import('./aids');
+    const one = { on: true, points: [[100, 0] as [number, number]] };
+    // Dragged roughly towards the point: lands exactly on the line to it.
+    const [x, y] = snapPerspective([0, 100], [46, 50], one);
+    expect(x + y).toBeCloseTo(100);
+    expect(x).toBeCloseTo(48);
+    expect(snapPerspective([0, 100], [3, 40], one)).toEqual([0, 40]);
+    expect(snapPerspective([0, 100], [60, 97], one)).toEqual([60, 100]);
+    // Two points: no level lines, only towards either point or upright.
+    const two = { on: true, points: [[-100, 0], [200, 0]] as [number, number][] };
+    const [ex, ey] = snapPerspective([50, 100], [120, 60], two);
+    expect((ey - 100) / (ex - 50)).toBeCloseTo(-100 / 150);
+    expect(snapPerspective([50, 100], [52, 160], two)).toEqual([50, 160]);
+  });
+});

@@ -104,6 +104,11 @@ you use them in: to move an animation between devices or browsers, use
   from the left one to add a guide, drag its marker to move it, and drag it
   back onto its ruler (or double-click the marker) to remove it. Lines and
   shapes snap to guides. Guides are saved with the animation.
+  **Perspective** (in the line and brush options) shows a 1-point or
+  2-point perspective grid: lines drawn with the line tool run towards a
+  vanishing point, straight up, or (with one point) level, whichever is
+  closest to how you drag. Drag the white dots to move the vanishing points.
+  Hold Shift for 45° lines instead.
 - **Reference image.** *Add reference image…* (the picture button in the
   Layers panel, or the ⋯ menu) adds a picture to trace over as a see-through
   layer at the bottom. It shows on every frame but never in exports or

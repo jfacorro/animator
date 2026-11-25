@@ -3,7 +3,7 @@ import { ExportDialog } from './components/ExportDialog';
 import * as I from './components/Icons';
 import { DEFAULT_ONION, LayersPanel, type OnionState } from './components/LayersPanel';
 import { Splitter } from './components/Splitter';
-import { addReferenceLayer, referenceGotDrawings, type Symmetry } from './model/aids';
+import { addReferenceLayer, defaultPerspective, referenceGotDrawings, type Symmetry } from './model/aids';
 import { readImageFile } from './images';
 import { actionFor, displayKey, keyOf, loadKeymap, type ActionId, type Keymap } from './keys';
 import { useLongPress } from './components/longPress';
@@ -882,6 +882,25 @@ export default function App() {
           <label title="Mirror what you draw across the middle of the canvas (Y to switch)">Symmetry
             <select value={aids.symmetry} onChange={(e) => setAids((a) => ({ ...a, symmetry: e.target.value as Symmetry }))}>
               {SYMMETRY.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          </label>
+        )}
+        {(tool === 'line' || tool === 'brush') && (
+          <label title="Perspective guide: lines drawn with the line tool run towards the vanishing points (or straight up, or level). Drag the white dots to move the points.">Perspective
+            <select
+              value={project.perspective?.on ? String(project.perspective.points.length) : 'off'}
+              onChange={(e) => {
+                const v = e.target.value;
+                apply((p) => {
+                  if (v === 'off') return p.perspective ? { ...p, perspective: { ...p.perspective, on: false } } : p;
+                  const n = v === '1' ? 1 : 2;
+                  return { ...p, perspective: p.perspective?.points.length === n ? { ...p.perspective, on: true } : defaultPerspective(n, p.width, p.height) };
+                });
+              }}
+            >
+              <option value="off">Off</option>
+              <option value="1">1-point</option>
+              <option value="2">2-point</option>
             </select>
           </label>
         )}

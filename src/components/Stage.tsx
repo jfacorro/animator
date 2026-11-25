@@ -6,7 +6,7 @@ import { catchUp, stabilize } from '../model/brushes';
 import { groupOf } from '../model/groups';
 import { cameraAt, cameraCorners, hasCamera, setCameraKey, type CameraView } from '../model/camera';
 import { bakePaint, composeFrame, encodePaint, livePaint, movePaintRegion, mulMatrix, paintSheet, PAPER, pushPixels, warpPaintRegion, smudgeStep, blurStep, paintReady, fontCss, LINE_HEIGHT, measureText, onImageLoad, paintSource, paintStroke, selectionMask, type OnionOptions } from '../render/render';
-import { placeReference, rulerStep, snapToGuides, symmetricStrokes, type GuideAxis, type Symmetry } from '../model/aids';
+import { placeReference, rulerStep, snapPerspective, snapToGuides, symmetricStrokes, type GuideAxis, type Symmetry } from '../model/aids';
 import { addGuide, moveGuide, removeGuide } from '../model/aids';
 import { tapDown, tapMove, tapUp, type Taps } from '../model/taps';
 import { pushStrokes, startGrid, warpPoint, warpStrokes, type Grid } from '../model/warp';
@@ -172,6 +172,9 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   const [, setOverlayTick] = useState(0);
   const [stageSize, setStageSize] = useState({ w: 800, h: 600 });
   const [guideDrag, setGuideDrag] = useState<GuideDrag | null>(null);
+  /** A vanishing point being dragged. */
+  const [vpDrag, setVpDrag] = useState<{ pointerId: number; index: number; pos: Vec } | null>(null);
+  const persp = project.perspective?.on ? project.perspective : null;
   const [imageTick, setImageTick] = useState(0);
   /** Text being typed: where it goes, in project px. */
   const [textEdit, setTextEdit] = useState<{ x: number; y: number } | null>(null);
@@ -686,9 +689,20 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
-    if (gestureRef.current) return;
+    if (gestureRef.current || vpDrag) return;
     const pt = toPoint(e, false);
     const [x, y] = pt;
+
+    // Drag a vanishing point, with any tool.
+    if (persp && !playing) {
+      const r = 14 / vs;
+      const index = persp.points.findIndex(([px, py]) => Math.hypot(px - x, py - y) <= r);
+      if (index >= 0) {
+        e.currentTarget.setPointerCapture(e.pointerId);
+        setVpDrag({ pointerId: e.pointerId, index, pos: persp.points[index] });
+        return;
+      }
+    }
 
     if (tool === 'camera') {
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -864,6 +878,11 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       const [cx, cy] = toLocal(e);
       setCursor({ x: cx, y: cy });
     }
+    if (vpDrag && vpDrag.pointerId === e.pointerId) {
+      const [x, y] = toPoint(e, false);
+      setVpDrag({ ...vpDrag, pos: [x, y] });
+      return;
+    }
     const g = gestureRef.current;
     if (tool === 'select' && !g) {
       const box = selectionBox();
@@ -914,7 +933,8 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
           ey = sy + Math.sign(dy || 1) * side;
         }
       }
-      if (!e.shiftKey) [ex, ey] = snap([ex, ey]);
+      if (!e.shiftKey && persp && g.stroke.kind === 'line') [ex, ey] = snapPerspective([sx, sy], [ex, ey], persp);
+      else if (!e.shiftKey) [ex, ey] = snap([ex, ey]);
       g.stroke = { ...g.stroke, points: [g.stroke.points[0], [ex, ey, 0.5]] };
     } else if (g.type === 'gradient') {
       if (Math.hypot(x - g.start[0], y - g.start[1]) * vs > 4) g.moved = true;
@@ -976,6 +996,12 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   };
 
   const finish = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (vpDrag && vpDrag.pointerId === e.pointerId) {
+      const { index, pos } = vpDrag;
+      setVpDrag(null);
+      onCommit((p) => (p.perspective ? { ...p, perspective: { ...p.perspective, points: p.perspective.points.map((q, i) => (i === index ? pos : q)) } } : p));
+      return;
+    }
     const g = gestureRef.current;
     if (!g || g.pointerId !== e.pointerId) return;
     gestureRef.current = null;
@@ -1155,7 +1181,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
           onPointerCancel={finish}
           onPointerLeave={() => setCursor(null)}
         />
-        {(box || camCorners || guides || guideDrag || axes || g?.type === 'lasso' || (g?.type === 'stroke' && brush.stabilizer > 0 && !g.stroke.erase)) && (
+        {(box || camCorners || guides || guideDrag || axes || (persp && !playing) || g?.type === 'lasso' || (g?.type === 'stroke' && brush.stabilizer > 0 && !g.stroke.erase)) && (
           <svg className="overlay" viewBox={`0 0 ${project.width} ${project.height}`} aria-hidden="true">
             {axes && (
               <g className="symmetry-axes" stroke="#c45bd6" strokeWidth={1.2 / vs} strokeDasharray={`${10 / vs} ${6 / vs}`}>
@@ -1163,6 +1189,26 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
                 {symmetry !== 'x' && <line x1={0} y1={project.height / 2} x2={project.width} y2={project.height / 2} />}
               </g>
             )}
+            {persp && !playing && (() => {
+              const pts = persp.points.map((p, i) => (vpDrag?.index === i ? vpDrag.pos : p));
+              const far = 4 * (project.width + project.height);
+              return (
+                <g className="perspective" stroke="#f08c00" strokeWidth={1 / vs}>
+                  {pts.length === 2
+                    ? <line x1={pts[0][0] - (pts[1][0] - pts[0][0]) * 50} y1={pts[0][1] - (pts[1][1] - pts[0][1]) * 50} x2={pts[1][0] + (pts[1][0] - pts[0][0]) * 50} y2={pts[1][1] + (pts[1][1] - pts[0][1]) * 50} strokeWidth={1.5 / vs} />
+                    : <line x1={-far} y1={pts[0][1]} x2={far} y2={pts[0][1]} strokeWidth={1.5 / vs} />}
+                  {pts.map(([px, py], i) => (
+                    <g key={i} opacity={0.35}>
+                      {Array.from({ length: 36 }, (_, k) => {
+                        const a = (k / 36) * Math.PI * 2;
+                        return <line key={k} x1={px} y1={py} x2={px + Math.cos(a) * far} y2={py + Math.sin(a) * far} />;
+                      })}
+                    </g>
+                  ))}
+                  {pts.map(([px, py], i) => <circle key={`h${i}`} className="vp-handle" cx={px} cy={py} r={7 / vs} fill="#fff" strokeWidth={2 / vs} />)}
+                </g>
+              );
+            })()}
             {!playing && (guides || guideDrag) && (
               <g className="guides" stroke="#22b8cf" strokeWidth={1 / vs}>
                 {guides?.x.map((x, i) => !(guideDrag?.axis === 'x' && guideDrag.index === i) && <line key={`x${i}`} x1={x} y1={-1e5} x2={x} y2={1e5} />)}
