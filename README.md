@@ -114,6 +114,11 @@ you use them in: to move an animation between devices or browsers, use
   layer at the bottom. It shows on every frame but never in exports or
   playback, and can't be drawn on. Select its layer and use the Lasso tool to
   move it, or drag a corner to resize it.
+- **Reference window.** *Reference window* in the ⋯ menu opens a small
+  window that floats over the canvas: drag its title bar to move it and its
+  corner to resize it. It shows the whole frame as it will look (through the
+  camera), handy while you're zoomed in, or a picture of your choice, which
+  is kept in this browser.
 - **Camera.** The camera tool (K) frames the shot: drag the blue frame to pan,
   a corner to zoom, and use the rotation slider to tilt. Each change sets a key
   on the current frame, and the camera eases between keys. Remove a key with
