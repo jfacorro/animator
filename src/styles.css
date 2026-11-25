@@ -289,12 +289,14 @@ input[type='checkbox'] { accent-color: var(--accent); }
 
 /* Auto-save to file status */
 .file-status {
-  margin-left: 10px; font-size: 12px; color: var(--muted); white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis;
+  margin-left: 10px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   border: 0; background: transparent; font-family: inherit; padding: 0;
+  /* Always the same width, whatever it says, so the buttons beside it don't shift while it saves. */
+  flex: 0 0 200px; width: 200px; text-align: left;
 }
 .file-status.error { color: var(--danger); }
 button.file-status.paused {
-  color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 3px 10px; cursor: pointer;
+  text-align: center; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 3px 10px; cursor: pointer;
 }
 
 /* Brushes and palette */
