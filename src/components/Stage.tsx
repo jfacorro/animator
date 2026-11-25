@@ -5,7 +5,7 @@ import { floodFillSpans } from '../render/fill';
 import { catchUp, stabilize } from '../model/brushes';
 import { groupOf } from '../model/groups';
 import { cameraAt, cameraCorners, hasCamera, setCameraKey, type CameraView } from '../model/camera';
-import { bakePaint, composeFrame, mulMatrix, PAPER, paintReady, fontCss, LINE_HEIGHT, measureText, onImageLoad, paintSource, paintStroke, selectionMask, type OnionOptions } from '../render/render';
+import { bakePaint, composeFrame, encodePaint, livePaint, movePaintRegion, mulMatrix, paintSheet, PAPER, paintReady, fontCss, LINE_HEIGHT, measureText, onImageLoad, paintSource, paintStroke, selectionMask, type OnionOptions } from '../render/render';
 import { placeReference, rulerStep, snapToGuides, symmetricStrokes, type GuideAxis, type Symmetry } from '../model/aids';
 import { addGuide, moveGuide, removeGuide } from '../model/aids';
 import { tapDown, tapMove, tapUp, type Taps } from '../model/taps';
@@ -53,6 +53,9 @@ interface Props {
   /** Stroke indices selected in the current drawing (select tool). */
   selection: number[] | null;
   onSelectionChange: (selection: number[] | null) => void;
+  /** Paint layers: the selected area's outline. */
+  paintSelection: Vec[] | null;
+  onPaintSelectionChange: (outline: Vec[] | null) => void;
   /** Apply an edit to the project as one undo step. */
   onCommit: (edit: (p: Project) => Project) => void;
   onPickColor: (color: string) => void;
@@ -124,7 +127,14 @@ function movedRect(r: { x: number; y: number; width: number; height: number }, m
 }
 const EDITS: Tool[] = ['brush', 'eraser', 'line', 'rect', 'ellipse', 'fill', 'text', 'select'];
 
-export function Stage({ project, frame, activeLayerId, tool, brush, onion, selection, onSelectionChange, onCommit, onPickColor, panKey, onPanned, playing, keymap, symmetry, rulers, onRulersChange, touchDraws, onUndo, onRedo }: Props) {
+/** The box around an outline. */
+function outlineBox(pts: Vec[]): Box {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [x, y] of pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+  return { x0, y0, x1, y1 };
+}
+
+export function Stage({ project, frame, activeLayerId, tool, brush, onion, selection, onSelectionChange, paintSelection, onPaintSelectionChange, onCommit, onPickColor, panKey, onPanned, playing, keymap, symmetry, rulers, onRulersChange, touchDraws, onUndo, onRedo }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gestureRef = useRef<Gesture | null>(null);
@@ -151,10 +161,12 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   const isRef = !!layer?.reference;
   const blocked = !layer ? 'Pick a layer to draw on'
     : isRef && tool !== 'select' ? 'This is a reference image: pick another layer to draw on. Use the Lasso tool to move or resize it.'
-    : layer.paint && tool === 'select' ? 'The Lasso works on line layers. Paint layers can\'t be selected yet.'
     : layer.locked ? 'This layer is locked' : group?.locked ? 'This layer\'s group is locked'
     : !layer.visible ? 'This layer is hidden' : group && !group.visible ? 'This layer\'s group is hidden' : null;
   const drawing = layer ? drawingAt(project, layer, frame) : null;
+  // Paint layers: the selection is an area of pixels. While it's dragged, its pixels are on this sheet.
+  const paintSel = layer?.paint && tool === 'select' ? paintSelection : null;
+  const paintSheetRef = useRef<HTMLCanvasElement | null>(null);
   /** On an alpha-locked layer, new lines and paint keep to what the drawing already has. */
   const lockStroke = (s: Stroke): Stroke => (layer?.alphaLock && !s.erase ? { ...s, atop: true } : s);
   const scale = display.w / project.width;
@@ -239,6 +251,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     if (g && (g.type === 'move' || g.type === 'scale')) {
       const ref = project.layers.find((l) => l.id === activeLayerId)?.reference;
       if (ref) shown = placeReference(project, activeLayerId, movedRect(ref, g.matrix));
+      else if (paintSel && paintSheetRef.current) shown = setPaint(project, activeLayerId, frame, livePaint(movePaintRegion(paintSheetRef.current, paintSel, g.matrix)));
       else if (selection) shown = transformStrokes(project, activeLayerId, frame, selection, g.matrix);
     }
     const live = g && (g.type === 'stroke' || g.type === 'shape' || g.type === 'gradient')
@@ -487,8 +500,8 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       const r = g0 && (g0.type === 'move' || g0.type === 'scale') ? movedRect(ref, g0.matrix) : ref;
       return { x0: r.x, y0: r.y, x1: r.x + r.width, y1: r.y + r.height };
     }
-    if (!selection || !drawing) return null;
-    const box = unionBoxes(selection.map((i) => (drawing.strokes[i] ? strokeBounds(drawing.strokes[i]) : null)));
+    if (!paintSel && (!selection || !drawing)) return null;
+    const box = paintSel ? outlineBox(paintSel) : unionBoxes(selection!.map((i) => (drawing!.strokes[i] ? strokeBounds(drawing!.strokes[i]) : null)));
     const g = gestureRef.current;
     if (!box || !g || (g.type !== 'move' && g.type !== 'scale')) return box;
     const a = apply(g.matrix, box.x0, box.y0);
@@ -637,11 +650,16 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
         const r = 12 / vs;
         const corners: Vec[] = [[box.x0, box.y0], [box.x1, box.y0], [box.x1, box.y1], [box.x0, box.y1]];
         const hit = corners.findIndex(([cx, cy]) => Math.abs(cx - x) <= r && Math.abs(cy - y) <= r);
+        const grab = hit >= 0 || (x >= box.x0 && x <= box.x1 && y >= box.y0 && y <= box.y1);
+        if (grab && paintSel) {
+          try { paintSheetRef.current = paintSheet(drawing?.paint, project.width, project.height); }
+          catch (err) { flash((err as Error).message); return; }
+        }
         if (hit >= 0) {
           gestureRef.current = { type: 'scale', pointerId: id, corner: corners[hit], origin: corners[(hit + 2) % 4], matrix: [1, 0, 0, 1, 0, 0] };
           return;
         }
-        if (x >= box.x0 && x <= box.x1 && y >= box.y0 && y <= box.y1) {
+        if (grab) {
           gestureRef.current = { type: 'move', pointerId: id, start: [x, y], matrix: [1, 0, 0, 1, 0, 0] };
           return;
         }
@@ -651,6 +669,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
         return;
       }
       onSelectionChange(null);
+      onPaintSelectionChange(null);
       gestureRef.current = { type: 'lasso', pointerId: id, points: [[x, y]] };
       schedulePaint();
       return;
@@ -814,6 +833,11 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       if (v !== g.base) onCommit((p) => setCameraKey(p, frame, v));
       else paint();
       setOverlayTick((t) => t + 1);
+    } else if (g.type === 'lasso' && layer?.paint) {
+      // An area of pixels: the loop itself, if it encloses anything.
+      const b = outlineBox(g.points);
+      onPaintSelectionChange(g.points.length > 2 && (b.x1 - b.x0) * vs > 4 && (b.y1 - b.y0) * vs > 4 ? g.points : null);
+      setOverlayTick((t) => t + 1);
     } else if (g.type === 'lasso') {
       const strokes = drawing?.strokes ?? [];
       let hits = strokesInLasso(strokes, g.points);
@@ -830,11 +854,18 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       }
       onSelectionChange(hits.length ? hits : null);
       setOverlayTick((t) => t + 1);
-    } else if (layer?.reference || selection) {
+    } else if (layer?.reference || selection || paintSel) {
       const m = g.matrix;
       const ref = layer?.reference;
+      const sheet = paintSheetRef.current;
+      paintSheetRef.current = null;
       if (m[0] !== 1 || m[3] !== 1 || m[4] !== 0 || m[5] !== 0) {
         if (ref) onCommit((p) => placeReference(p, activeLayerId, movedRect(ref, m)));
+        else if (paintSel && sheet) {
+          const moved = encodePaint(movePaintRegion(sheet, paintSel, m), project.width, project.height);
+          onCommit((p) => setPaint(p, activeLayerId, frame, moved));
+          onPaintSelectionChange(paintSel.map(([px, py]) => apply(m, px, py)));
+        }
         else if (selection) onCommit((p) => transformStrokes(p, activeLayerId, frame, selection, m));
       } else {
         paint();
@@ -980,6 +1011,13 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
             {g?.type === 'lasso' && (
               <polyline points={g.points.map((p) => p.join(',')).join(' ')} fill="rgba(240,164,58,0.08)" stroke="#f0a43a" strokeWidth={1.5 / vs} strokeDasharray={`${5 / vs} ${4 / vs}`} />
             )}
+            {box && paintSel && (
+              <polygon
+                points={paintSel.map((p) => p.join(',')).join(' ')}
+                transform={g && (g.type === 'move' || g.type === 'scale') ? `matrix(${g.matrix.join(' ')})` : undefined}
+                fill="none" stroke="#f0a43a" strokeWidth={1.5 / vs} strokeDasharray={`${5 / vs} ${4 / vs}`}
+              />
+            )}
             {box && mask && (
               // The selection's own edges: a rim just outside the selected strokes.
               <g transform={g && (g.type === 'move' || g.type === 'scale') ? `matrix(${g.matrix.join(' ')})` : undefined}>
@@ -998,7 +1036,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
             )}
             {box && (
               <g>
-                <rect x={box.x0} y={box.y0} width={box.x1 - box.x0} height={box.y1 - box.y0} fill="none" stroke="#f0a43a" strokeWidth={(mask ? 1 : 1.5) / vs} strokeOpacity={mask ? 0.45 : 1} strokeDasharray={`${6 / vs} ${4 / vs}`} />
+                <rect x={box.x0} y={box.y0} width={box.x1 - box.x0} height={box.y1 - box.y0} fill="none" stroke="#f0a43a" strokeWidth={(mask || paintSel ? 1 : 1.5) / vs} strokeOpacity={mask || paintSel ? 0.45 : 1} strokeDasharray={`${6 / vs} ${4 / vs}`} />
                 {[[box.x0, box.y0], [box.x1, box.y0], [box.x1, box.y1], [box.x0, box.y1]].map(([cx, cy], i) => (
                   <rect key={i} x={cx - hs / 2} y={cy - hs / 2} width={hs} height={hs} fill="#fff" stroke="#f0a43a" strokeWidth={1.5 / vs} />
                 ))}

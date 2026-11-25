@@ -444,7 +444,7 @@ const BAKED_LIMIT = 8;
 
 /** Something to draw a paint drawing's pixels from, or null while its image decodes. */
 export function paintSource(p: Paint): CanvasImageSource | null {
-  return baked.get(p.data) ?? loadedImage(p.data);
+  return baked.get(p.data) ?? live.get(p.data) ?? loadedImage(p.data);
 }
 
 /** Wait until every paint drawing can be drawn (before exporting, which draws frames straight away). */
@@ -459,22 +459,78 @@ export async function paintReady(project: Project): Promise<void> {
   await Promise.all(waits);
 }
 
+/** A paint drawing's pixels on a project-size sheet. Throws while its image is still decoding. */
+export function paintSheet(base: Paint | undefined, w: number, h: number): HTMLCanvasElement {
+  const c = makeCanvas(w, h);
+  if (base) {
+    const src = paintSource(base);
+    if (!src) throw new Error('The drawing is still loading. Try again in a moment.');
+    c.getContext('2d', { willReadFrequently: true })!.drawImage(src, base.x, base.y);
+  }
+  return c;
+}
+
+/**
+ * Pixels inside `region` (a closed outline) taken from `sheet`, moved by `m`.
+ * `keep` leaves the original in place (duplicate); `remove` drops the region (delete).
+ */
+export function movePaintRegion(sheet: HTMLCanvasElement, region: [number, number][], m: Matrix, opts: { keep?: boolean; remove?: boolean } = {}): HTMLCanvasElement {
+  const { width: w, height: h } = sheet;
+  const out = makeCanvas(w, h);
+  const ctx = out.getContext('2d', { willReadFrequently: true })!;
+  const outline = () => {
+    ctx.beginPath();
+    region.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.closePath();
+  };
+  ctx.drawImage(sheet, 0, 0);
+  if (!opts.keep) {
+    ctx.save();
+    outline();
+    ctx.clip();
+    ctx.clearRect(0, 0, w, h);
+    ctx.restore();
+  }
+  if (!opts.remove) {
+    ctx.save();
+    ctx.setTransform(...m);
+    ctx.imageSmoothingQuality = 'high';
+    outline();
+    ctx.clip();
+    ctx.drawImage(sheet, 0, 0);
+    ctx.restore();
+  }
+  return out;
+}
+
+// The one sheet being dragged right now, kept apart so it never pushes real paint out of `baked`.
+const live = new Map<string, HTMLCanvasElement>();
+let liveCounter = 0;
+/** Show a sheet as a paint drawing without encoding it (while dragging a selection). */
+export function livePaint(c: HTMLCanvasElement): Paint {
+  const data = `live:${++liveCounter}`;
+  live.clear();
+  live.set(data, c);
+  return { data, x: 0, y: 0, width: c.width, height: c.height };
+}
+
 /**
  * Paint `strokes` onto a paint drawing's pixels (`base`) and return the new pixels,
  * cropped to where there is paint, or null when nothing is left. Fills go under
  * what's already there, like on stroke layers; the eraser really removes paint.
  */
 export function bakePaint(base: Paint | undefined, strokes: Stroke[], w: number, h: number): Paint | null {
-  const c = makeCanvas(w, h);
+  const c = paintSheet(base, w, h);
   const ctx = c.getContext('2d', { willReadFrequently: true })!;
-  if (base) {
-    const src = paintSource(base);
-    if (!src) throw new Error('The drawing is still loading. Try again in a moment.');
-    ctx.drawImage(src, base.x, base.y);
-  }
   // Alpha-locked paint keeps to what's already there, so it goes on in order, onto the same sheet.
   if (strokes.some((s) => s.atop)) for (const s of strokes) paintStroke(ctx, s);
   else paintDrawing(ctx, strokes);
+  return encodePaint(c, w, h);
+}
+
+/** A project-size sheet of pixels as a paint drawing, cropped to where there is paint (null when empty). */
+export function encodePaint(c: HTMLCanvasElement, w: number, h: number): Paint | null {
+  const ctx = c.getContext('2d', { willReadFrequently: true })!;
   // Crop to the painted area.
   const px = ctx.getImageData(0, 0, w, h).data;
   let x0 = w, y0 = h, x1 = -1, y1 = -1;
