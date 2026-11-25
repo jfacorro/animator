@@ -9,6 +9,8 @@ import * as I from './Icons';
 interface Props {
   project: Project;
   onClose: () => void;
+  /** Playback is set to ping-pong: GIFs play forwards then backwards too. */
+  pingPong?: boolean;
 }
 
 const SIZES = [0.5, 0.75, 1, 1.5, 2];
@@ -28,7 +30,7 @@ function shareFile(blob: Blob, name: string): File | null {
   return navigator.canShare({ files: [file] }) ? file : null;
 }
 
-export function ExportDialog({ project, onClose }: Props) {
+export function ExportDialog({ project, onClose, pingPong = false }: Props) {
   const [format, setFormat] = useState<Format>('gif');
   const [scale, setScale] = useState(0.75);
   const [sound, setSound] = useState(true);
@@ -80,7 +82,7 @@ export function ExportDialog({ project, onClose }: Props) {
       } else if (format === 'png') {
         blob = await exportPngSequence(project, safeFileName(project.name), { scale, paper, includeHidden, onProgress });
       } else {
-        blob = await exportGif(project, { scale, paper, includeHidden, onProgress });
+        blob = await exportGif(project, { scale, paper, includeHidden, pingPong, onProgress });
       }
       setResult({ blob, url: URL.createObjectURL(blob) });
     } catch (err) {
@@ -112,7 +114,7 @@ export function ExportDialog({ project, onClose }: Props) {
             <span className="muted">
               {result
                 ? `${fileName} · ${size(result.blob.size)}${format === 'png' ? ` · ${frames} PNG images` : ''}`
-                : `${frames} frames at ${project.fps} fps = ${seconds} s${format === 'gif' ? ', looping' : ''}`}
+                : `${frames} frames at ${project.fps} fps = ${seconds} s${format === 'gif' ? (pingPong ? ', forwards then backwards, looping' : ', looping') : ''}`}
             </span>
           </div>
           <div className="dialog-form">

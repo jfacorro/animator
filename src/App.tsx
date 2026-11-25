@@ -8,6 +8,7 @@ import { readImageFile } from './images';
 import { actionFor, displayKey, keyOf, loadKeymap, type ActionId, type Keymap } from './keys';
 import { useLongPress } from './components/longPress';
 import { ShortcutsDialog } from './components/ShortcutsDialog';
+import { nextFrame, PLAY_MODES, type PlayMode } from './model/playback';
 import { encodePaint, FONTS, movePaintRegion, paintSheet } from './render/render';
 import { Stage, type BrushSettings, type Tool } from './components/Stage';
 import { Timeline, type FrameAction } from './components/Timeline';
@@ -145,7 +146,8 @@ export default function App() {
   const [onion, setOnion] = useState<OnionState>(() => ({ ...DEFAULT_ONION, ...loadPref<Partial<OnionState>>(ONION_KEY, {}, (v) => typeof v === 'object') }));
   useEffect(() => { savePref(ONION_KEY, onion); }, [onion]);
   const [playing, setPlaying] = useState(false);
-  const [loop, setLoop] = useState(true);
+  const [playMode, setPlayMode] = useState<PlayMode>('loop');
+  const playDir = useRef<1 | -1>(1);
   const [exporting, setExporting] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -331,24 +333,25 @@ export default function App() {
       while (acc >= step) {
         acc -= step;
         setFrame((f) => {
-          if (f + 1 < length) return f + 1;
-          if (loop) return 0;
-          setPlaying(false);
-          return f;
+          const n = nextFrame(f, length, playMode, playDir.current);
+          playDir.current = n.dir;
+          if (n.stop) setPlaying(false);
+          return n.frame;
         });
       }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [playing, project.fps, length, loop]);
+  }, [playing, project.fps, length, playMode]);
 
   const togglePlay = useCallback(() => {
     setPlaying((p) => {
-      if (!p && frame >= length - 1) setFrame(0);
+      playDir.current = 1;
+      if (!p && frame >= length - 1 && playMode !== 'pingpong') setFrame(0);
       return !p;
     });
-  }, [frame, length]);
+  }, [frame, length, playMode]);
 
   const goTo = useCallback((f: number) => {
     setPlaying(false);
@@ -683,7 +686,9 @@ export default function App() {
               {[6, 8, 12, 15, 24].map((f) => <option key={f} value={f}>{f} fps</option>)}
             </select>
           </label>
-          <button className={`btn small${loop ? ' on' : ''}`} style={{ marginLeft: 6 }} aria-pressed={loop} title="Start again from the first frame when playback reaches the end" onClick={() => setLoop((l) => !l)}>Loop</button>
+          <select className="play-mode" style={{ marginLeft: 6 }} aria-label="Playback" title={PLAY_MODES.find((m) => m.id === playMode)?.help} value={playMode} onChange={(e) => setPlayMode(e.target.value as PlayMode)}>
+            {PLAY_MODES.map((m) => <option key={m.id} value={m.id} title={m.help}>{m.name}</option>)}
+          </select>
         </div>
         <div className="spacer" />
         <button className={`btn${onion.enabled ? ' on' : ''}`} aria-pressed={onion.enabled} title="Show the previous and next drawings faintly while you draw (O). Set how many, their colours and strength in the Layers panel." onClick={() => setOnion((o) => ({ ...o, enabled: !o.enabled }))}>
@@ -1007,7 +1012,7 @@ export default function App() {
 
       {toast && <div className="toast" role="status">{toast}</div>}
       {shortcutsOpen && <ShortcutsDialog keymap={keymap} onChange={setKeymap} onClose={() => setShortcutsOpen(false)} />}
-      {exporting && <ExportDialog project={project} onClose={() => setExporting(false)} />}
+      {exporting && <ExportDialog project={project} pingPong={playMode === 'pingpong'} onClose={() => setExporting(false)} />}
     </div>
   );
 }

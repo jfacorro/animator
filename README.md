@@ -58,6 +58,10 @@ you use them in: to move an animation between devices or browsers, use
   bucket stores the filled pixels as runs and paints them under the lines of
   the same drawing; the lasso selects whole strokes and moves/resizes them by
   giving each stroke a transform.
+- **Playback and fixed layers.** Next to the speed, choose *Loop*, *Ping-pong*
+  (forwards then backwards, also used for GIF exports) or *Once*. Tick *Same on
+  every frame* in a layer's settings to make it a foreground or background: its
+  first drawing shows throughout and gets no onion skin.
 - **Onion skin.** Previous drawings show in red, next ones in blue (up to 5
   each way). The Layers panel sets their colours, strength, and whether they
   show on the selected layer or on every unlocked layer.

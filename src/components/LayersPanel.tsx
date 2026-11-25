@@ -32,7 +32,7 @@ interface Props {
   onMove: (id: string, delta: number) => void;
   /** Drag a layer or group to a spot in the stack. */
   onDrop: (id: string, kind: DragKind, drop: Drop) => void;
-  onUpdate: (id: string, patch: Partial<Pick<Layer, 'name' | 'visible' | 'locked' | 'opacity' | 'blend' | 'clip' | 'alphaLock'>>, record?: boolean) => void;
+  onUpdate: (id: string, patch: Partial<Pick<Layer, 'name' | 'visible' | 'locked' | 'opacity' | 'blend' | 'clip' | 'alphaLock' | 'everyFrame'>>, record?: boolean) => void;
   /** The selected group, when a group row was clicked (its settings show below). */
   selectedGroupId: string | null;
   onSelectGroup: (id: string | null) => void;
@@ -148,6 +148,12 @@ export function LayersPanel(props: Props) {
             <label className="row" title={isBottom ? 'There is no layer below this one to clip to' : 'Clipping mask: only show this layer where the layer below it has paint. Great for shading and colour inside the lines.'}>
               Clip to layer below
               <input type="checkbox" disabled={!!isBottom && !active.clip} checked={!!active.clip} onChange={(e) => props.onUpdate(active.id, { clip: e.target.checked })} />
+            </label>
+          )}
+          {!group && active && !active.reference && (
+            <label className="row" title="Foreground or background: this layer's first drawing shows on every frame, and gets no onion skin. Good for a set, a sky or a frame around the shot.">
+              Same on every frame
+              <input type="checkbox" checked={!!active.everyFrame} onChange={(e) => props.onUpdate(active.id, { everyFrame: e.target.checked })} />
             </label>
           )}
           {!group && active && !active.reference && (

@@ -1,11 +1,14 @@
 import { applyPalette, GIFEncoder, quantize } from 'gifenc';
 import { sceneLength, type Project } from '../model/project';
 import { composeFrame } from '../render/render';
+import { playOrder } from '../model/playback';
 
 export interface GifOptions {
   scale: number;
   paper: boolean;
   includeHidden: boolean;
+  /** Play forwards then backwards (ping-pong) before looping. */
+  pingPong?: boolean;
   onProgress?: (done: number, total: number) => void;
 }
 
@@ -25,18 +28,25 @@ export async function exportGif(project: Project, opts: GifOptions): Promise<Blo
   out.height = h;
   const octx = out.getContext('2d', { willReadFrequently: true })!;
 
-  const total = sceneLength(project);
+  const order = playOrder(sceneLength(project), opts.pingPong ? 'pingpong' : 'loop');
+  const total = order.length;
   const frames: { data: Uint8ClampedArray; frames: number }[] = [];
-  for (let f = 0; f < total; f++) {
-    composeFrame(fctx, project, f, { paper: opts.paper, includeHidden: opts.includeHidden, camera: true });
-    octx.clearRect(0, 0, w, h);
-    octx.drawImage(full, 0, 0, w, h);
-    const data = octx.getImageData(0, 0, w, h).data;
+  const drawn = new Map<number, Uint8ClampedArray>();
+  for (let k = 0; k < total; k++) {
+    const f = order[k];
+    let data = drawn.get(f);
+    if (!data) {
+      composeFrame(fctx, project, f, { paper: opts.paper, includeHidden: opts.includeHidden, camera: true });
+      octx.clearRect(0, 0, w, h);
+      octx.drawImage(full, 0, 0, w, h);
+      data = octx.getImageData(0, 0, w, h).data;
+      drawn.set(f, data);
+    }
     const prev = frames.at(-1);
     if (prev && sameImage(prev.data, data)) prev.frames += 1;
     else frames.push({ data, frames: 1 });
-    opts.onProgress?.(f + 1, total * 2);
-    if (f % 4 === 3) await nextTick();
+    opts.onProgress?.(k + 1, total * 2);
+    if (k % 4 === 3) await nextTick();
   }
 
   const gif = GIFEncoder();
