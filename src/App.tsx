@@ -35,6 +35,7 @@ const TOOLS: { id: Tool; name: string; key: string; help: string; Icon: () => Re
   { id: 'text', name: 'Text', key: 't', help: 'click the canvas and type. Enter finishes, Shift+Enter starts a new line', Icon: I.Text },
   { id: 'eyedropper', name: 'Eyedropper', key: 'i', help: 'pick a colour from the canvas', Icon: I.Dropper },
   { id: 'select', name: 'Lasso select', key: 's', help: 'select strokes to move, resize, flip or delete', Icon: I.Lasso },
+  { id: 'liquify', name: 'Liquify', key: 'w', help: 'push lines or paint around, like a finger in wet paint, to nudge a pose or squash and stretch', Icon: I.Liquify },
   { id: 'camera', name: 'Camera', key: 'k', help: 'frame the shot: pan, zoom and rotate the camera, keyed over time', Icon: I.Camera },
 ];
 const COLOUR_TOOLS: Tool[] = ['brush', 'line', 'rect', 'ellipse', 'fill', 'text', 'eyedropper'];
@@ -72,7 +73,7 @@ const MAX_PALETTE = 24;
 
 const INK = PRESETS.find((p) => p.id === 'ink')!;
 const DEFAULT_BRUSH: BrushSettings = {
-  color: '#1a1a1a', eraserSize: 24, pressure: true, fillShapes: false,
+  color: '#1a1a1a', eraserSize: 24, liquifySize: 80, pressure: true, fillShapes: false,
   fillMode: 'solid', color2: '#ffffff', fadeOut: true, font: 'sans', textSize: 48, bold: false,
   size: INK.size, opacity: INK.opacity, smoothing: INK.smoothing, stabilizer: INK.stabilizer, thinning: INK.thinning, softness: INK.softness,
 };
@@ -94,6 +95,22 @@ const AIDS_KEY = 'animator:aids';
 const SYMMETRY: { id: Symmetry; name: string }[] = [
   { id: 'off', name: 'Off' }, { id: 'x', name: 'Left–right' }, { id: 'y', name: 'Top–bottom' }, { id: 'xy', name: 'Both' },
 ];
+/** The size each tool's [ and ] change, and its range. */
+type SizeKey = 'size' | 'eraserSize' | 'liquifySize' | 'textSize';
+const SIZED: Partial<Record<Tool, { key: SizeKey; min: number; max: number }>> = {
+  brush: { key: 'size', min: 1, max: 60 },
+  line: { key: 'size', min: 1, max: 60 },
+  rect: { key: 'size', min: 1, max: 60 },
+  ellipse: { key: 'size', min: 1, max: 60 },
+  eraser: { key: 'eraserSize', min: 1, max: 120 },
+  liquify: { key: 'liquifySize', min: 10, max: 400 },
+  text: { key: 'textSize', min: 8, max: 240 },
+};
+/** One step smaller or bigger: 1 px for thin sizes, about a tenth for big ones, so every range takes a similar number of presses. */
+function stepSize(v: number, r: { min: number; max: number }, bigger: boolean): number {
+  const step = Math.max(1, Math.round(v * 0.1));
+  return Math.min(r.max, Math.max(r.min, bigger ? v + step : v - step));
+}
 const isHex = (c: unknown) => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c);
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 
@@ -119,6 +136,10 @@ export default function App() {
   const [selection, setSelection] = useState<number[] | null>(null);
   /** Paint layers: the outline of the selected area. */
   const [paintSel, setPaintSel] = useState<[number, number][] | null>(null);
+  /** Lasso: bend the selection with a grid of handles instead of moving it. */
+  const [warp, setWarp] = useState(false);
+  const hasSelection = !!selection || !!paintSel;
+  useEffect(() => { if (!hasSelection) setWarp(false); }, [hasSelection]);
   /** A group row selected in the Layers panel (its opacity and blend show there). */
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [onion, setOnion] = useState<OnionState>(() => ({ ...DEFAULT_ONION, ...loadPref<Partial<OnionState>>(ONION_KEY, {}, (v) => typeof v === 'object') }));
@@ -538,8 +559,10 @@ export default function App() {
       else if (action === 'frame.new') newDrawing();
       else if (action === 'frame.duplicate') duplicate();
       else if (action === 'onion.toggle') setOnion((o) => ({ ...o, enabled: !o.enabled }));
-      else if (action === 'brush.smaller') setBrush((b) => (tool === 'eraser' ? { ...b, eraserSize: Math.max(2, b.eraserSize - 2) } : { ...b, size: Math.max(1, b.size - 1) }));
-      else if (action === 'brush.bigger') setBrush((b) => (tool === 'eraser' ? { ...b, eraserSize: Math.min(120, b.eraserSize + 2) } : { ...b, size: Math.min(60, b.size + 1) }));
+      else if (action === 'brush.smaller' || action === 'brush.bigger') {
+        const sz = SIZED[tool];
+        if (sz) setBrush((b) => ({ ...b, [sz.key]: stepSize(b[sz.key] ?? sz.min, sz, action === 'brush.bigger') }));
+      }
     };
     // Space plays on release, unless it was held to pan the canvas.
     const onKeyUp = (e: KeyboardEvent) => {
@@ -627,6 +650,7 @@ export default function App() {
 
   const isEraser = tool === 'eraser';
   const size = isEraser ? brush.eraserSize : brush.size;
+  const liquifySize = brush.liquifySize ?? 80;
 
   return (
     <div className="app">
@@ -728,6 +752,15 @@ export default function App() {
             <span className="value">{size} px</span>
           </label>
         )}
+        {tool === 'liquify' && (
+          <>
+            <label title="How wide an area moves with the pointer ([ and ] to change)">Size
+              <input type="range" min={10} max={400} value={liquifySize} onChange={(e) => setBrush((b) => ({ ...b, liquifySize: Number(e.target.value) }))} />
+              <span className="value">{liquifySize} px</span>
+            </label>
+            <span className="hint">{activeLayer?.paint ? 'Drag to push the paint around' : 'Drag to push lines around: bend a pose, squash and stretch'}</span>
+          </>
+        )}
         {tool === 'brush' && (
           <>
             <label title="Evens out shaky lines. Higher values give smoother curves but follow the pen less closely.">Smoothing
@@ -791,7 +824,7 @@ export default function App() {
                 {Object.entries(FONTS).map(([id, f]) => <option key={id} value={id} style={{ fontFamily: f.css }}>{f.name}</option>)}
               </select>
             </label>
-            <label title="Size of the letters in pixels">Size
+            <label title="Size of the letters in pixels ([ and ] to change)">Size
               <input type="range" min={8} max={240} value={brush.textSize} onChange={(e) => setBrush((b) => ({ ...b, textSize: Number(e.target.value) }))} />
               <span className="value">{brush.textSize} px</span>
             </label>
@@ -806,6 +839,7 @@ export default function App() {
         {tool === 'select' && activeLayer?.paint && paintSel && (
           <>
             <span className="hint">Area selected · drag to move · drag a corner to resize (Shift keeps proportions)</span>
+            <button className={`btn small${warp ? ' on' : ''}`} aria-pressed={warp} title="Warp: bend the selection by dragging the handles of a grid over it" onClick={() => setWarp((w) => !w)}>Warp</button>
             <button className="btn small" title="Mirror the selected paint left to right" onClick={() => { const cx = paintAreaCentre(); editPaintArea([-1, 0, 0, 1, 2 * cx, 0], {}); }}>Flip</button>
             <button className="btn small" title="Copy the selected paint, slightly offset" onClick={() => editPaintArea([1, 0, 0, 1, 16, 16], { keep: true })}>Duplicate</button>
             <button className="btn small" title="Erase the selected paint (Delete)" onClick={() => editPaintArea([1, 0, 0, 1, 0, 0], { remove: true })}>Delete</button>
@@ -815,6 +849,7 @@ export default function App() {
         {tool === 'select' && selection && (
           <>
             <span className="hint">{selection.length} selected · drag to move · drag a corner to resize (Shift keeps proportions)</span>
+            <button className={`btn small${warp ? ' on' : ''}`} aria-pressed={warp} title="Warp: bend the selection by dragging the handles of a grid over it" onClick={() => setWarp((w) => !w)}>Warp</button>
             <button className="btn small" title="Mirror the selection left to right" onClick={flipSelection}>Flip</button>
             <button className="btn small" title="Copy the selection, slightly offset" onClick={duplicateSelection}>Duplicate</button>
             <button className="btn small" title="Copy the selection to paste it into another frame or layer (Ctrl+C, then Ctrl+V)" onClick={() => copyStrokes(activeLayerId, frame, selection)}>Copy</button>
@@ -896,7 +931,7 @@ export default function App() {
 
         <Stage
           project={project} frame={frame} activeLayerId={activeLayerId} tool={tool} brush={brush} onion={onion$}
-          selection={selection} onSelectionChange={setSelection} paintSelection={paintSel} onPaintSelectionChange={setPaintSel} onCommit={onCommit}
+          selection={selection} onSelectionChange={setSelection} paintSelection={paintSel} onPaintSelectionChange={setPaintSel} warp={warp} onCommit={onCommit}
           panKey={spaceHeld} onPanned={() => { spacePanned.current = true; }} playing={playing}
           keymap={keymap} symmetry={aids.symmetry} rulers={aids.rulers} onRulersChange={(rulers) => setAids((a) => ({ ...a, rulers }))}
           touchDraws={touchDraws} onUndo={() => setHistory(undo)} onRedo={() => setHistory(redo)}

@@ -45,6 +45,11 @@ you use them in: to move an animation between devices or browsers, use
   line trail the pointer (shown by an orange string) and catches up when you
   let go. The palette and your last brush are kept in the browser: **+** adds
   the current colour, right-click a swatch to remove it.
+- **Warp and Liquify.** With a selection, **Warp** puts a grid of nine
+  handles over it: drag them to bend the drawing (lines stay lines, paint
+  bends as pixels). The **Liquify** tool (W) pushes lines or paint along with
+  the pointer, like a finger in wet paint, for nudging a pose or squash and
+  stretch; set how wide an area moves with Size.
 - **QuickShape.** Draw a rough line, circle, ellipse or box with the brush and
   keep the pen still at the end for half a second: it snaps into a clean
   shape. Keep holding and drag to adjust it (a line's end follows the pen, a
@@ -170,7 +175,7 @@ them all and lets you change them; your keys are kept in this browser.
 | I | Eyedropper (or Alt+click with a drawing tool) |
 | S | Lasso select: drag to move, corners to resize, Delete to remove, Esc to deselect |
 | K | Camera (Delete removes the key on this frame) |
-| [ / ] | Smaller / bigger brush |
+| [ / ] | Smaller / bigger size for the current tool (brush, eraser, shapes, Liquify, text) |
 | Y | Symmetry: off → left–right → top–bottom → both |
 | Shift+R | Rulers and guides on / off |
 | N | New drawing after the current one |

@@ -554,3 +554,8 @@ export function isProject(value: unknown): value is Project {
     typeof p.drawings === 'object'
   );
 }
+
+/** Swap the strokes of the drawing at a frame (after bending them with Warp or Liquify). */
+export function replaceStrokes(project: Project, layerId: string, frame: number, strokes: Stroke[]): Project {
+  return editStrokes(project, layerId, frame, () => strokes);
+}
