@@ -128,6 +128,12 @@ draw there, brush, shapes, text and fills, becomes pixels, and the eraser
 really removes paint. Paint layers can't be selected with the Lasso or copied
 yet; Duplicate repeats a paint drawing.
 
+**Alpha lock** (in the layer settings) keeps new paint to where the layer
+already has paint, for shading and recolouring without going over the edges.
+The eraser still erases. It works on line layers too: new lines only show
+where the drawing already has lines or fills. There they stay separate strokes,
+clipped to whatever is under them, so select both when you move them.
+
 ## iPad and Apple Pencil
 
 Open the app in Safari, then *Share → Add to Home Screen* to run it full screen

@@ -32,6 +32,8 @@ export interface Stroke {
   spans?: number[];
   /** Set when a selection was moved or scaled. */
   matrix?: Matrix;
+  /** Paint only over what's already there (drawn on an alpha-locked layer). */
+  atop?: boolean;
   /** Fills: a colour ramp instead of a flat colour. */
   gradient?: Gradient;
   /** Text: the words (lines split by newlines). `size` is the font size, and the two points are the box's corners. */
@@ -95,6 +97,8 @@ export interface Layer {
   reference?: RefImage;
   /** A paint layer: what's drawn on it becomes pixels, and the eraser really removes paint. */
   paint?: boolean;
+  /** Paint layers: new paint only goes where the layer already has paint (Procreate's alpha lock). */
+  alphaLock?: boolean;
 }
 
 export type BlendMode =
