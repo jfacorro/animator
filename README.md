@@ -38,13 +38,17 @@ you use them in: to move an animation between devices or browsers, use
   pressure comes from the browser's Pointer Events; mouse strokes simulate it
   from speed (turn off "Pressure" for an even line). The eraser only affects
   the drawing it is used on.
-- **Brushes.** Pencil, Ink, Marker and Soft presets set size, opacity,
+- **Brushes.** Pencil, Ink, Marker, Soft, Graphite and Chalk presets set size, opacity,
   smoothing, stabilizer, pressure and edge softness; any of them can be tuned.
   Opacity applies to the whole stroke, so a stroke doesn't darken where it
   crosses itself, while overlapping strokes build up. The stabilizer makes the
   line trail the pointer (shown by an orange string) and catches up when you
   let go. The palette and your last brush are kept in the browser: **+** adds
   the current colour, right-click a swatch to remove it.
+  **Graphite** and **Chalk** are textured: paper grain shows through the
+  line. **Edit…** opens the brush editor with every setting, a live preview
+  and the grain (Pencil, Chalk or Canvas, and how much shows); name the brush
+  and *Save as new brush* to add it next to the presets.
 - **Warp and Liquify.** With a selection, **Warp** puts a grid of nine
   handles over it: drag them to bend the drawing (lines stay lines, paint
   bends as pixels). The **Liquify** tool (W) pushes lines or paint along with

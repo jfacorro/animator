@@ -448,3 +448,12 @@ button.file-status.paused {
   .track-names { width: 110px; }
   .view-controls { right: 6px; bottom: 6px; max-width: calc(100% - 12px); overflow-x: auto; }
 }
+
+/* Brush editor */
+.dialog.brush-editor { max-width: 720px; }
+.brush-preview { display: block; max-width: 100%; border-radius: 8px; border: 1px solid var(--border); }
+.brush-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; align-items: center; }
+.saved-brush { display: inline-flex; align-items: center; gap: 6px; padding: 2px 2px 2px 10px; border: 1px solid var(--border-2); border-radius: 8px; }
+.row-input { display: inline-flex; align-items: center; gap: 8px; }
+.row-input input[type=range] { width: 140px; }
+.brush-editor .dialog-foot input[type=text] { flex: 1; min-width: 0; max-width: 220px; }

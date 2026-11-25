@@ -18,7 +18,8 @@ import * as P from './model/project';
 import { groupLayer, isLocked, isShown, moveGroupToGap, removeGroup, ungroup, updateGroup } from './model/groups';
 import { cameraAt, hasCamera, keyAt, removeCameraKey, setCameraKey } from './model/camera';
 import { readAudioFile, useAudioPlayback } from './audio';
-import { matchingPreset, PRESETS, type BrushPreset } from './model/brushes';
+import { matchingPreset, PRESETS, validBrush, type BrushPreset } from './model/brushes';
+import { BrushEditor } from './components/BrushEditor';
 import {
   canSaveToFile, filePermission, loadCurrentProject, loadLinkedFile, pickOpenFile, pickSaveFile, readProjectFile, rememberLinkedFile,
   saveCurrentProject, saveProjectFile, writeProjectFile, type LinkedFile,
@@ -47,6 +48,7 @@ const KEYS_KEY = 'animator:keys';
 const DEFAULT_PALETTE = ['#1a1a1a', '#6b6f78', '#e5534b', '#f08a3a', '#f2c94c', '#6faf6a', '#5b8fd9', '#9b6fd6', '#ffffff'];
 const PALETTE_KEY = 'animator:palette';
 const BRUSH_KEY = 'animator:brush';
+const BRUSHES_KEY = 'animator:brushes';
 const ONION_KEY = 'animator:onion';
 const SCRUB_KEY = 'animator:scrub';
 const PANELS_KEY = 'animator:panels';
@@ -79,6 +81,7 @@ const DEFAULT_BRUSH: BrushSettings = {
   color: '#1a1a1a', eraserSize: 24, liquifySize: 80, fxSize: 40, fxStrength: 0.6, pressure: true, fillShapes: false,
   fillMode: 'solid', color2: '#ffffff', fadeOut: true, font: 'sans', textSize: 48, bold: false,
   size: INK.size, opacity: INK.opacity, smoothing: INK.smoothing, stabilizer: INK.stabilizer, thinning: INK.thinning, softness: INK.softness,
+  grain: 'none', grainAmount: 0,
 };
 
 /** Per-browser preferences: the palette and the last brush. Storage can be blocked, so every access is guarded. */
@@ -134,9 +137,17 @@ export default function App() {
   const [palette, setPalette] = useState<string[]>(() => loadPref(PALETTE_KEY, DEFAULT_PALETTE, (v) => Array.isArray(v) && v.length > 0 && v.every(isHex)));
   useEffect(() => { savePref(BRUSH_KEY, brush); }, [brush]);
   useEffect(() => { savePref(PALETTE_KEY, palette); }, [palette]);
-  const preset = matchingPreset(brush);
+  /** Brushes the user saved in the brush editor. */
+  const [savedBrushes, setSavedBrushes] = useState<BrushPreset[]>(() => {
+    const list = loadPref<unknown[]>(BRUSHES_KEY, [], Array.isArray);
+    return list.map(validBrush).filter((b): b is BrushPreset => !!b);
+  });
+  useEffect(() => { savePref(BRUSHES_KEY, savedBrushes); }, [savedBrushes]);
+  const [brushEditor, setBrushEditor] = useState(false);
+  const preset = matchingPreset(brush, savedBrushes);
   const usePreset = (p: BrushPreset) => setBrush((b) => ({
     ...b, size: p.size, opacity: p.opacity, smoothing: p.smoothing, stabilizer: p.stabilizer, thinning: p.thinning, softness: p.softness, pressure: p.thinning > 0,
+    grain: p.grain ?? 'none', grainAmount: p.grainAmount ?? 0,
   }));
   const [selection, setSelection] = useState<number[] | null>(null);
   /** Paint layers: the outline of the selected area. */
@@ -507,7 +518,7 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
-      if (exporting || shortcutsOpen) return;
+      if (exporting || shortcutsOpen || brushEditor) return;
       // Space still plays after clicking a button, slider or checkbox: let go of its focus
       // so the browser doesn't also press or toggle it.
       const textField = t.closest('textarea, select, input:not([type=range]):not([type=checkbox]):not([type=color]):not([type=radio])');
@@ -590,7 +601,7 @@ export default function App() {
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
     };
-  }, [exporting, frame, length, tool, togglePlay, goTo, newDrawing, duplicate, selection, deleteSelection, copyStrokes, pasteStrokes, activeLayerId, activeLayer, apply, project, notify, keymap, shortcutsOpen, paintSel, editPaintArea]);
+  }, [exporting, frame, length, tool, togglePlay, goTo, newDrawing, duplicate, selection, deleteSelection, copyStrokes, pasteStrokes, activeLayerId, activeLayer, apply, project, notify, keymap, shortcutsOpen, brushEditor, paintSel, editPaintArea]);
 
   const newProject = () => {
     setMenuOpen(false);
@@ -746,10 +757,11 @@ export default function App() {
         <span className="tool-name">{TOOLS.find((t) => t.id === tool)?.name}</span>
         {tool === 'brush' && (
           <div className="presets" role="group" aria-label="Brush presets">
-            {PRESETS.map((p) => (
+            {[...PRESETS, ...savedBrushes].map((p) => (
               <button key={p.id} className={`btn small${preset?.id === p.id ? ' on' : ''}`} aria-pressed={preset?.id === p.id} title={`${p.name}: ${p.help}`} onClick={() => usePreset(p)}>{p.name}</button>
             ))}
             {!preset && <span className="hint" title="You've changed the settings of a preset">Custom</span>}
+            <button className="btn small" title="Brush editor: every setting, paper grain, and saving your own brushes" onClick={() => setBrushEditor(true)}>Edit…</button>
           </div>
         )}
         {(tool === 'brush' || tool === 'eraser' || tool === 'line' || tool === 'rect' || tool === 'ellipse') && !(brush.fillShapes && (tool === 'rect' || tool === 'ellipse')) && (
@@ -1029,6 +1041,12 @@ export default function App() {
 
       {toast && <div className="toast" role="status">{toast}</div>}
       {shortcutsOpen && <ShortcutsDialog keymap={keymap} onChange={setKeymap} onClose={() => setShortcutsOpen(false)} />}
+      {brushEditor && (
+        <BrushEditor
+          brush={brush} saved={savedBrushes} onSave={setSavedBrushes}
+          onChange={(patch) => setBrush((b) => ({ ...b, ...patch }))} onClose={() => setBrushEditor(false)}
+        />
+      )}
       {exporting && <ExportDialog project={project} pingPong={playMode === 'pingpong'} onClose={() => setExporting(false)} />}
     </div>
   );

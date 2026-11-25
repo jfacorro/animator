@@ -1,7 +1,7 @@
 import { getStroke } from 'perfect-freehand';
 import { cameraAt, cameraMatrix, hasCamera } from '../model/camera';
 import { compositeOp, sceneUnits } from '../model/groups';
-import { celIndexAt, isBlank, type Drawing, type FontId, type Layer, type Paint, type Project, type Stroke } from '../model/project';
+import { celIndexAt, isBlank, type Drawing, type FontId, type GrainKind, type Layer, type Paint, type Project, type Stroke } from '../model/project';
 
 export const PAPER = '#fbfaf7';
 export const ONION_BEFORE = '#e5534b';
@@ -192,6 +192,10 @@ export function paintStroke(ctx: CanvasRenderingContext2D, s: Stroke, live = fal
     paintText(ctx, s);
     return;
   }
+  if (s.grain && s.grain.amount > 0 && !s.erase && kind !== 'fill') {
+    paintGrainy(ctx, s, live);
+    return;
+  }
   const path = strokePath(s, live);
   ctx.save();
   if (s.matrix) ctx.transform(...s.matrix);
@@ -215,6 +219,105 @@ export function paintStroke(ctx: CanvasRenderingContext2D, s: Stroke, live = fal
     ctx.fillStyle = s.erase ? color : fillStyleFor(ctx, s);
     ctx.fill(path);
   }
+  ctx.restore();
+}
+
+// Textured brushes: the stroke is painted on its own, then a grain pattern is
+// knocked out of it, and the result laid down like any other stroke.
+let grainSheet: HTMLCanvasElement | null = null;
+const grainTiles = new Map<GrainKind, HTMLCanvasElement>();
+
+/** A repeating 256 px tile of grain: where it's dark, paint is taken away. */
+function grainTile(kind: GrainKind): HTMLCanvasElement {
+  let tile = grainTiles.get(kind);
+  if (tile) return tile;
+  const n = 256;
+  tile = makeCanvas(n, n);
+  const ctx = tile.getContext('2d')!;
+  const img = ctx.createImageData(n, n);
+  let seed = kind === 'pencil' ? 7 : kind === 'chalk' ? 11 : 13;
+  const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  // Value noise: random values on a coarse grid, smoothly blended, wrapping at the edges.
+  const coarse = (cells: number) => {
+    const v = Array.from({ length: cells * cells }, rand);
+    return (x: number, y: number) => {
+      const fx = (x / n) * cells, fy = (y / n) * cells;
+      const x0 = Math.floor(fx), y0 = Math.floor(fy);
+      const tx = fx - x0, ty = fy - y0;
+      const sx = tx * tx * (3 - 2 * tx), sy = ty * ty * (3 - 2 * ty);
+      const at = (i: number, j: number) => v[((j % cells) * cells) + (i % cells)];
+      const a = at(x0, y0), b = at(x0 + 1, y0), c = at(x0, y0 + 1), d = at(x0 + 1, y0 + 1);
+      return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
+    };
+  };
+  const big = coarse(16), mid = coarse(64), fine = coarse(128);
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      let k: number;
+      if (kind === 'pencil') k = Math.max(0, (fine(x, y) * 0.7 + mid(x, y) * 0.3 - 0.45) * 2.4);
+      else if (kind === 'chalk') k = Math.max(0, (big(x, y) * 0.5 + mid(x, y) * 0.3 + fine(x, y) * 0.2 - 0.4) * 2.2);
+      else {
+        // Canvas: a woven grid with a little noise.
+        const weave = (Math.sin((x / n) * Math.PI * 2 * 64) * Math.sin((y / n) * Math.PI * 2 * 64) + 1) / 2;
+        k = Math.max(0, weave * 0.7 + fine(x, y) * 0.3 - 0.35) * 1.6;
+      }
+      const o = (y * n + x) * 4;
+      img.data[o + 3] = Math.min(255, k * 255);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  grainTiles.set(kind, tile);
+  return tile;
+}
+
+function paintGrainy(ctx: CanvasRenderingContext2D, s: Stroke, live: boolean) {
+  const { width, height } = ctx.canvas;
+  if (!grainSheet) grainSheet = makeCanvas(width, height);
+  if (grainSheet.width < width || grainSheet.height < height) {
+    grainSheet.width = Math.max(grainSheet.width, width);
+    grainSheet.height = Math.max(grainSheet.height, height);
+  }
+  // Only the part of the canvas this stroke can touch.
+  const t = ctx.getTransform();
+  const m = s.matrix;
+  const grow = Math.sqrt(Math.abs(t.a * t.d - t.b * t.c)) * (m ? Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) : 1);
+  const pad = s.size * grow * (1 + (s.softness ?? 0)) + 4;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of s.points) {
+    const px = m ? m[0] * p[0] + m[2] * p[1] + m[4] : p[0];
+    const py = m ? m[1] * p[0] + m[3] * p[1] + m[5] : p[1];
+    const dx = t.a * px + t.c * py + t.e, dy = t.b * px + t.d * py + t.f;
+    x0 = Math.min(x0, dx); y0 = Math.min(y0, dy); x1 = Math.max(x1, dx); y1 = Math.max(y1, dy);
+  }
+  const bx = Math.max(0, Math.floor(x0 - pad)), by = Math.max(0, Math.floor(y0 - pad));
+  const bw = Math.min(width, Math.ceil(x1 + pad)) - bx, bh = Math.min(height, Math.ceil(y1 + pad)) - by;
+  if (bw <= 0 || bh <= 0) return;
+  const g = grainSheet.getContext('2d')!;
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.globalAlpha = 1;
+  g.globalCompositeOperation = 'source-over';
+  g.clearRect(bx, by, bw, bh);
+  g.setTransform(t);
+  paintStroke(g, { ...s, grain: undefined, opacity: undefined, atop: undefined }, live);
+  // The grain is anchored to the page, so it stays put under the brush like paper does.
+  g.globalCompositeOperation = 'destination-out';
+  g.globalAlpha = Math.min(1, s.grain!.amount);
+  const pattern = g.createPattern(grainTile(s.grain!.kind), 'repeat');
+  if (pattern) {
+    const scale = Math.max(0.5, s.size / 24);
+    pattern.setTransform(new DOMMatrix([scale, 0, 0, scale, 0, 0]));
+    g.fillStyle = pattern;
+    // Cover the stroke's area in page units.
+    const inv = t.inverse();
+    const corners = [[bx, by], [bx + bw, by], [bx, by + bh], [bx + bw, by + bh]].map(([x, y]) => [inv.a * x + inv.c * y + inv.e, inv.b * x + inv.d * y + inv.f]);
+    const xs = corners.map((c) => c[0]), ys = corners.map((c) => c[1]);
+    g.fillRect(Math.min(...xs), Math.min(...ys), Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+  }
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (s.opacity !== undefined && s.opacity < 1) ctx.globalAlpha *= s.opacity;
+  ctx.globalCompositeOperation = s.atop ? 'source-atop' : 'source-over';
+  ctx.drawImage(grainSheet, bx, by, bw, bh, bx, by, bw, bh);
   ctx.restore();
 }
 

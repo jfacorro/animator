@@ -32,6 +32,8 @@ export interface Stroke {
   spans?: number[];
   /** Set when a selection was moved or scaled. */
   matrix?: Matrix;
+  /** A paper-like texture in the stroke (textured brushes). */
+  grain?: { kind: GrainKind; amount: number };
   /** Paint only over what's already there (drawn on an alpha-locked layer). */
   atop?: boolean;
   /** Fills: a colour ramp instead of a flat colour. */
@@ -42,6 +44,7 @@ export interface Stroke {
   bold?: boolean;
 }
 
+export type GrainKind = 'pencil' | 'chalk' | 'canvas';
 export type StrokeKind = 'free' | 'line' | 'rect' | 'ellipse' | 'fill' | 'text';
 
 export type FontId = 'sans' | 'serif' | 'hand' | 'mono';
