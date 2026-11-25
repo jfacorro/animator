@@ -45,6 +45,10 @@ you use them in: to move an animation between devices or browsers, use
   line trail the pointer (shown by an orange string) and catches up when you
   let go. The palette and your last brush are kept in the browser: **+** adds
   the current colour, right-click a swatch to remove it.
+- **QuickShape.** Draw a rough line, circle, ellipse or box with the brush and
+  keep the pen still at the end for half a second: it snaps into a clean
+  shape. Keep holding and drag to adjust it (a line's end follows the pen, a
+  closed shape turns and grows), then lift to finish.
 - **Tools.** Lines, rectangles and ellipses are stored as shapes; the fill
   bucket stores the filled pixels as runs and paints them under the lines of
   the same drawing; the lasso selects whole strokes and moves/resizes them by
