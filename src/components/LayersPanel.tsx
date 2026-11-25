@@ -32,7 +32,7 @@ interface Props {
   onMove: (id: string, delta: number) => void;
   /** Drag a layer or group to a spot in the stack. */
   onDrop: (id: string, kind: DragKind, drop: Drop) => void;
-  onUpdate: (id: string, patch: Partial<Pick<Layer, 'name' | 'visible' | 'locked' | 'opacity' | 'blend' | 'clip'>>, record?: boolean) => void;
+  onUpdate: (id: string, patch: Partial<Pick<Layer, 'name' | 'visible' | 'locked' | 'opacity' | 'blend' | 'clip' | 'alphaLock'>>, record?: boolean) => void;
   /** The selected group, when a group row was clicked (its settings show below). */
   selectedGroupId: string | null;
   onSelectGroup: (id: string | null) => void;
@@ -148,6 +148,12 @@ export function LayersPanel(props: Props) {
             <label className="row" title={isBottom ? 'There is no layer below this one to clip to' : 'Clipping mask: only show this layer where the layer below it has paint. Great for shading and colour inside the lines.'}>
               Clip to layer below
               <input type="checkbox" disabled={!!isBottom && !active.clip} checked={!!active.clip} onChange={(e) => props.onUpdate(active.id, { clip: e.target.checked })} />
+            </label>
+          )}
+          {!group && active && !active.reference && (
+            <label className="row" title={active.paint ? 'Alpha lock: new paint only goes where this layer already has paint, so you can shade and recolour without going over the edges. The eraser still erases.' : 'Alpha lock works on paint layers. On a line layer, use a clipping mask instead.'}>
+              Alpha lock
+              <input type="checkbox" disabled={!active.paint} checked={!!active.paint && !!active.alphaLock} onChange={(e) => props.onUpdate(active.id, { alphaLock: e.target.checked })} />
             </label>
           )}
         </div>

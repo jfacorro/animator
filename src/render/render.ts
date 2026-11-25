@@ -184,7 +184,7 @@ export function paintStroke(ctx: CanvasRenderingContext2D, s: Stroke, live = fal
   const path = strokePath(s, live);
   ctx.save();
   if (s.matrix) ctx.transform(...s.matrix);
-  ctx.globalCompositeOperation = s.erase ? 'destination-out' : 'source-over';
+  ctx.globalCompositeOperation = s.erase ? 'destination-out' : s.atop ? 'source-atop' : 'source-over';
   if (!s.erase && s.opacity !== undefined && s.opacity < 1) ctx.globalAlpha *= s.opacity;
   // Soft edges: blur in canvas pixels, scaled by how much the stroke's matrix (and any zoom) enlarges it.
   if (s.softness && !s.erase && 'filter' in ctx) {
@@ -463,7 +463,9 @@ export function bakePaint(base: Paint | undefined, strokes: Stroke[], w: number,
     if (!src) throw new Error('The drawing is still loading. Try again in a moment.');
     ctx.drawImage(src, base.x, base.y);
   }
-  paintDrawing(ctx, strokes);
+  // Alpha-locked paint keeps to what's already there, so it goes on in order, onto the same sheet.
+  if (strokes.some((s) => s.atop)) for (const s of strokes) paintStroke(ctx, s);
+  else paintDrawing(ctx, strokes);
   // Crop to the painted area.
   const px = ctx.getImageData(0, 0, w, h).data;
   let x0 = w, y0 = h, x1 = -1, y1 = -1;

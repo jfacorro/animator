@@ -155,6 +155,8 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     : layer.locked ? 'This layer is locked' : group?.locked ? 'This layer\'s group is locked'
     : !layer.visible ? 'This layer is hidden' : group && !group.visible ? 'This layer\'s group is hidden' : null;
   const drawing = layer ? drawingAt(project, layer, frame) : null;
+  /** On an alpha-locked paint layer, new paint keeps to what's already there. */
+  const lockStroke = (s: Stroke): Stroke => (layer?.paint && layer.alphaLock && !s.erase ? { ...s, atop: true } : s);
   const scale = display.w / project.width;
   /** Screen px per project px, including zoom. */
   const vs = scale * view.zoom;
@@ -240,7 +242,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       else if (selection) shown = transformStrokes(project, activeLayerId, frame, selection, g.matrix);
     }
     const live = g && (g.type === 'stroke' || g.type === 'shape' || g.type === 'gradient')
-      ? { layerId: activeLayerId, strokes: symmetricStrokes(g.stroke, symmetry, project.width, project.height) } : null;
+      ? { layerId: activeLayerId, strokes: symmetricStrokes(g.stroke, symmetry, project.width, project.height).map(lockStroke) } : null;
     composeFrame(ctx, shown, frame, { paper: true, onion, live, camera: playing, references: !playing });
     const sharp = sharpRef.current;
     if (sharpOn.current && sharp && !playing) {
@@ -536,7 +538,8 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   };
 
   /** Add strokes to the drawing here. On a paint layer they're baked into its pixels straight away. */
-  const commitStrokes = (strokes: Stroke[]) => {
+  const commitStrokes = (all: Stroke[]) => {
+    const strokes = all.map(lockStroke);
     if (!layer?.paint) {
       onCommit((p) => strokes.reduce((q, s) => addStroke(q, activeLayerId, frame, s), p));
       return;
