@@ -23,13 +23,22 @@
 
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; height: 100%; }
-body { background: var(--bg); overflow: hidden; }
+/* iPad and touch screens: no page bounce, no text selection or callouts on long press, no double-tap zoom. */
+html, body { overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
+body { background: var(--bg); overflow: hidden; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+input, textarea, [contenteditable] { -webkit-user-select: text; user-select: text; }
+button, select, label, a { touch-action: manipulation; }
 button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: default; opacity: 0.45; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.app { height: 100%; display: flex; flex-direction: column; }
+.app {
+  height: 100%; display: flex; flex-direction: column;
+  /* Room for the home bar and top edge. The sides are not inset: in landscape a phone's notch
+     only covers the middle of one edge, and leaving room for it wastes a whole strip. */
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+}
 
 /* Buttons */
 .btn {
@@ -392,3 +401,46 @@ button.file-status.paused {
 .key-btn.recording { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
 .key-row kbd { color: var(--muted); }
 .keys-note { margin-right: auto; font-size: 13px; color: var(--muted); }
+
+/* Fingers setting in the file menu. */
+.menu-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 10px; color: var(--muted); }
+.menu-row select { max-width: 210px; }
+
+/* Touch screens: bigger targets for fingers. */
+@media (pointer: coarse) {
+  .icon-btn { width: 42px; height: 42px; }
+  .btn.small { min-height: 34px; }
+  .menu-list button { padding: 12px 12px; }
+  .swatch { width: 26px; height: 26px; }
+  input[type='range'] { min-height: 30px; }
+}
+
+/* The tool settings bar only hides (no resizing). */
+.splitter.fixed { cursor: default; }
+.splitter.horizontal.fixed:not(.collapsed) { height: 1px; }
+
+/* Touch screens have no hover: keep the panel hide/show buttons visible and easy to hit. */
+@media (pointer: coarse) {
+  .splitter-btn { opacity: 1; }
+  .splitter.vertical .splitter-btn { width: 18px; height: 44px; }
+  .splitter.horizontal .splitter-btn { width: 44px; height: 18px; }
+  .splitter.vertical.collapsed { width: 20px; }
+  .splitter.horizontal.collapsed { height: 20px; }
+}
+
+/* Phones and small windows: one row for each bar, scrolling sideways instead of wrapping. */
+@media (max-width: 900px), (max-height: 520px) {
+  .topbar, .tool-options { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .topbar::-webkit-scrollbar, .tool-options::-webkit-scrollbar { display: none; }
+  .topbar > *, .tool-options > * { flex-shrink: 0; }
+  .topbar { min-height: 0; gap: 8px; padding: 4px 8px; }
+  .tool-options { min-height: 0; gap: 12px; padding: 4px 10px; }
+  .tool-options .hint, .file-status, .brand-name { display: none; }
+  .topbar .spacer { flex: 0 0 4px; }
+  .project-name { width: 130px; }
+  .timeline-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 4px 8px; gap: 8px; }
+  .timeline-bar::-webkit-scrollbar { display: none; }
+  .timeline-bar > * { flex-shrink: 0; }
+  .track-names { width: 110px; }
+  .view-controls { right: 6px; bottom: 6px; max-width: calc(100% - 12px); overflow-x: auto; }
+}

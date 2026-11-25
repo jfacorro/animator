@@ -8,6 +8,7 @@ import { cameraAt, cameraCorners, hasCamera, setCameraKey, type CameraView } fro
 import { composeFrame, fontCss, LINE_HEIGHT, measureText, onImageLoad, paintStroke, type OnionOptions } from '../render/render';
 import { placeReference, rulerStep, snapToGuides, symmetricStrokes, type GuideAxis, type Symmetry } from '../model/aids';
 import { addGuide, moveGuide, removeGuide } from '../model/aids';
+import { tapDown, tapMove, tapUp, type Taps } from '../model/taps';
 import { FIT_VIEW, flipAt, pinch, rotateAt, screenToLocal, snapRotation, viewTransform, zoomAt, type View } from '../model/view';
 import * as I from './Icons';
 import { actionFor, displayKey, keyOf, type Keymap } from '../keys';
@@ -67,6 +68,12 @@ interface Props {
   /** Show rulers along the stage edges; guides are dragged out of them. */
   rulers: boolean;
   onRulersChange: (on: boolean) => void;
+  /** Fingers draw. When false (an Apple Pencil is in use), one finger moves the canvas and only the pen draws. */
+  touchDraws: boolean;
+  /** Two-finger tap. */
+  onUndo: () => void;
+  /** Three-finger tap. */
+  onRedo: () => void;
 }
 
 const RULER = 20; // ruler thickness, screen px
@@ -110,7 +117,7 @@ function movedRect(r: { x: number; y: number; width: number; height: number }, m
 }
 const EDITS: Tool[] = ['brush', 'eraser', 'line', 'rect', 'ellipse', 'fill', 'text', 'select'];
 
-export function Stage({ project, frame, activeLayerId, tool, brush, onion, selection, onSelectionChange, onCommit, onPickColor, panKey, onPanned, playing, keymap, symmetry, rulers, onRulersChange }: Props) {
+export function Stage({ project, frame, activeLayerId, tool, brush, onion, selection, onSelectionChange, onCommit, onPickColor, panKey, onPanned, playing, keymap, symmetry, rulers, onRulersChange, touchDraws, onUndo, onRedo }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gestureRef = useRef<Gesture | null>(null);
@@ -118,6 +125,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   const navRef = useRef<Nav | null>(null);
   /** Touch points currently down on the stage, in screen offsets from the stage centre. */
   const touchesRef = useRef(new Map<number, Vec>());
+  const tapsRef = useRef<Taps | null>(null);
   const [display, setDisplay] = useState({ w: 640, h: 360 });
   const [view, setView] = useState<View>(FIT_VIEW);
   const [navigating, setNavigating] = useState(false);
@@ -153,7 +161,8 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     const el = wrapRef.current;
     if (!el) return;
     const fit = () => {
-      const pad = 48;
+      // Less margin around the canvas on a phone, where every pixel counts.
+      const pad = Math.min(el.clientWidth, el.clientHeight) < 420 ? 16 : 48;
       const aw = Math.max(100, el.clientWidth - pad);
       const ah = Math.max(100, el.clientHeight - pad);
       const s = Math.min(aw / project.width, ah / project.height);
@@ -270,10 +279,28 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     const at = fromCentre(e);
     if (e.pointerType === 'touch') {
       const touches = touchesRef.current;
+      // A hand resting on the screen while the pencil draws: ignore it.
+      if (!touchDraws && gestureRef.current) {
+        e.stopPropagation();
+        if (tapsRef.current) tapsRef.current.spoiled = true;
+        return;
+      }
+      tapsRef.current = tapDown(tapsRef.current, touches.size, e.pointerId, at, e.timeStamp);
       touches.set(e.pointerId, at);
-      if (touches.size < 2) return;
+      if (touches.size < 2) {
+        // Fingers only move the canvas: one finger pans (rulers, guides and typing still take fingers).
+        if (touchDraws || (e.target as HTMLElement).closest('.stage-ruler, .ruler-corner, .guide-marker, .text-entry')) return;
+        e.stopPropagation();
+        if (navRef.current) return;
+        navRef.current = { type: 'pan', pointerId: e.pointerId, last: at };
+        e.currentTarget.setPointerCapture(e.pointerId);
+        setNavigating(true);
+        return;
+      }
       e.stopPropagation();
-      if (touches.size > 2 || navRef.current) return;
+      const n0 = navRef.current;
+      // A second finger turns a one-finger pan into a pinch.
+      if (touches.size > 2 || (n0 && !(n0.type === 'pan' && touches.has(n0.pointerId)))) return;
       const g = gestureRef.current;
       if (g && touches.has(g.pointerId)) cancelGesture();
       const ids = [...touches.keys()] as [number, number];
@@ -281,6 +308,15 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       e.currentTarget.setPointerCapture(e.pointerId);
       setNavigating(true);
       return;
+    }
+    if (e.pointerType === 'pen') {
+      // The pencil takes over from a palm that started panning.
+      if (tapsRef.current) tapsRef.current.spoiled = true;
+      const n = navRef.current;
+      if (n?.type === 'pan' && touchesRef.current.has(n.pointerId)) {
+        navRef.current = null;
+        setNavigating(false);
+      }
     }
     if ((e.pointerType === 'mouse' && e.button === 1) || (panKey && e.button === 0)) {
       e.preventDefault();
@@ -296,7 +332,10 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   const onNavMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const at = fromCentre(e);
     const touches = touchesRef.current;
-    if (touches.has(e.pointerId)) touches.set(e.pointerId, at);
+    if (touches.has(e.pointerId)) {
+      touches.set(e.pointerId, at);
+      tapMove(tapsRef.current, e.pointerId, at);
+    }
     const n = navRef.current;
     if (n?.type === 'pan' && n.pointerId === e.pointerId) {
       const [dx, dy] = [at[0] - n.last[0], at[1] - n.last[1]];
@@ -310,7 +349,15 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   };
 
   const onNavUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    touchesRef.current.delete(e.pointerId);
+    const touches = touchesRef.current;
+    if (touches.delete(e.pointerId)) {
+      // The system cancels touches it decides are a palm: never a tap.
+      if (e.type === 'pointercancel' && tapsRef.current) tapsRef.current.spoiled = true;
+      const fingers = tapUp(tapsRef.current, touches.size, e.timeStamp);
+      if (!touches.size) tapsRef.current = null;
+      if (fingers === 2) onUndo();
+      else if (fingers === 3) onRedo();
+    }
     const n = navRef.current;
     if ((n?.type === 'pan' && n.pointerId === e.pointerId) || (n?.type === 'pinch' && n.ids.includes(e.pointerId))) {
       navRef.current = null;
@@ -543,8 +590,11 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const [cx, cy] = toLocal(e);
-    setCursor({ x: cx, y: cy });
+    // The brush outline follows a mouse, or an Apple Pencil hovering over the screen; never a finger.
+    if (e.pointerType !== 'touch') {
+      const [cx, cy] = toLocal(e);
+      setCursor({ x: cx, y: cy });
+    }
     const g = gestureRef.current;
     if (!g || g.pointerId !== e.pointerId) return;
     const [x, y] = toPoint(e, false);

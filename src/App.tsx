@@ -6,6 +6,7 @@ import { Splitter } from './components/Splitter';
 import { addReferenceLayer, referenceGotDrawings, type Symmetry } from './model/aids';
 import { readImageFile } from './images';
 import { actionFor, displayKey, keyOf, loadKeymap, type ActionId, type Keymap } from './keys';
+import { useLongPress } from './components/longPress';
 import { ShortcutsDialog } from './components/ShortcutsDialog';
 import { FONTS } from './render/render';
 import { Stage, type BrushSettings, type Tool } from './components/Stage';
@@ -45,6 +46,11 @@ const BRUSH_KEY = 'animator:brush';
 const ONION_KEY = 'animator:onion';
 const SCRUB_KEY = 'animator:scrub';
 const PANELS_KEY = 'animator:panels';
+const FINGERS_KEY = 'animator:fingers';
+const PEN_SEEN_KEY = 'animator:pen-seen';
+
+/** What a finger does on the canvas. 'auto' draws until an Apple Pencil (or other pen) is used, then moves the canvas. */
+type Fingers = 'auto' | 'draw' | 'navigate';
 
 interface Panels {
   tools: number;
@@ -53,8 +59,13 @@ interface Panels {
   hideTools: boolean;
   hideLayers: boolean;
   hideTimeline: boolean;
+  /** The bar with the current tool's settings, under the top bar. */
+  hideOptions: boolean;
 }
-const DEFAULT_PANELS: Panels = { tools: 60, layers: 280, timeline: 220, hideTools: false, hideLayers: false, hideTimeline: false };
+const DEFAULT_PANELS: Panels = { tools: 60, layers: 280, timeline: 220, hideTools: false, hideLayers: false, hideTimeline: false, hideOptions: false };
+/** A phone, or a small window: start with the layers panel hidden and a short timeline. */
+const smallScreen = () => typeof window !== 'undefined' && (window.innerWidth < 760 || window.innerHeight < 520);
+const COMPACT_PANELS: Partial<Panels> = { layers: 220, timeline: 110, hideLayers: true };
 const PANEL_LIMITS = { tools: [52, 160], layers: [200, 560], timeline: [110, 640] } as const;
 const clampPanel = (k: keyof typeof PANEL_LIMITS, v: number) => Math.round(Math.min(PANEL_LIMITS[k][1], Math.max(PANEL_LIMITS[k][0], v)));
 const MAX_PALETTE = 24;
@@ -152,11 +163,26 @@ export default function App() {
   const [keymap, setKeymap] = useState<Keymap>(() => loadKeymap(loadPref<unknown>(KEYS_KEY, null, () => true)));
   useEffect(() => { savePref(KEYS_KEY, keymap); }, [keymap]);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [fingers, setFingers] = useState<Fingers>(() => loadPref<Fingers>(FINGERS_KEY, 'auto', (v) => v === 'auto' || v === 'draw' || v === 'navigate'));
+  useEffect(() => { savePref(FINGERS_KEY, fingers); }, [fingers]);
+  const [penSeen, setPenSeen] = useState(() => loadPref(PEN_SEEN_KEY, false, (v) => typeof v === 'boolean'));
+  useEffect(() => {
+    if (penSeen) return;
+    const onPen = (e: PointerEvent) => {
+      if (e.pointerType !== 'pen') return;
+      setPenSeen(true);
+      savePref(PEN_SEEN_KEY, true);
+    };
+    window.addEventListener('pointerdown', onPen, true);
+    return () => window.removeEventListener('pointerdown', onPen, true);
+  }, [penSeen]);
+  const touchDraws = fingers === 'draw' || (fingers === 'auto' && !penSeen);
+  const holdSwatch = useLongPress();
   /** A tool's shortcut, for tooltips: ' (B)', or nothing when it has no key. */
   const keyHint = (id: ActionId) => (keymap[id] ? ` (${displayKey(keymap[id])})` : '');
 
   const length = P.sceneLength(project);
-  const [panels, setPanels] = useState<Panels>(() => ({ ...DEFAULT_PANELS, ...loadPref<Partial<Panels>>(PANELS_KEY, {}, (v) => typeof v === 'object') }));
+  const [panels, setPanels] = useState<Panels>(() => ({ ...DEFAULT_PANELS, ...(smallScreen() ? COMPACT_PANELS : {}), ...loadPref<Partial<Panels>>(PANELS_KEY, {}, (v) => typeof v === 'object') }));
   useEffect(() => { savePref(PANELS_KEY, panels); }, [panels]);
   /** Panel size when a resize drag started. */
   const panelStart = useRef<Panels | null>(null);
@@ -166,7 +192,7 @@ export default function App() {
     setPanels((p) => ({ ...p, [k]: clampPanel(k, base + grow) }));
     if (done) panelStart.current = null;
   };
-  const togglePanel = (k: 'hideTools' | 'hideLayers' | 'hideTimeline') => setPanels((p) => ({ ...p, [k]: !p[k] }));
+  const togglePanel = (k: 'hideTools' | 'hideLayers' | 'hideTimeline' | 'hideOptions') => setPanels((p) => ({ ...p, [k]: !p[k] }));
   const [scrub, setScrub] = useState(() => loadPref(SCRUB_KEY, true, (v) => typeof v === 'boolean'));
   useEffect(() => { savePref(SCRUB_KEY, scrub); }, [scrub]);
   useAudioPlayback(project, frame, playing, scrub);
@@ -458,8 +484,8 @@ export default function App() {
       if (key === 'tab' && !e.shiftKey) {
         e.preventDefault();
         setPanels((p) => {
-          const anyShown = !p.hideTools || !p.hideLayers || !p.hideTimeline;
-          return { ...p, hideTools: anyShown, hideLayers: anyShown, hideTimeline: anyShown };
+          const anyShown = !p.hideTools || !p.hideLayers || !p.hideTimeline || !p.hideOptions;
+          return { ...p, hideTools: anyShown, hideLayers: anyShown, hideTimeline: anyShown, hideOptions: anyShown };
         });
         return;
       }
@@ -582,7 +608,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand"><I.Logo /> Animator</div>
+        <div className="brand"><I.Logo /> <span className="brand-name">Animator</span></div>
         <input
           className="project-name" type="text" aria-label="Animation name" title="Name of this animation, used for exported files" value={project.name}
           onChange={(e) => apply((p) => ({ ...p, name: e.target.value }), false)}
@@ -620,11 +646,19 @@ export default function App() {
         <div className="menu">
           <button className="icon-btn" aria-label="File menu" title="New, open and save animations" aria-expanded={menuOpen} onClick={() => setMenuOpen((m) => !m)}><I.More /></button>
           {menuOpen && (
-            <div className="menu-list" onMouseLeave={() => setMenuOpen(false)}>
+            <div className="menu-list" onMouseLeave={() => { if (document.activeElement?.tagName !== 'SELECT') setMenuOpen(false); }}>
               <button onClick={newProject} title="Start a blank animation, replacing the current one">New animation</button>
               <button onClick={() => { setMenuOpen(false); audioInput.current?.click(); }} title="Add a sound (MP3, WAV…) to time the animation to, for example dialogue for lip-sync. It's saved inside the animation.">{project.audio ? 'Replace sound…' : 'Add sound…'}</button>
               <button onClick={() => { setMenuOpen(false); imageInput.current?.click(); }} title="Add a picture to trace over, as a see-through layer. It shows on every frame and is never exported.">Add reference image…</button>
               <button onClick={() => { setMenuOpen(false); setShortcutsOpen(true); }} title="See and change the keyboard shortcuts (?)">Keyboard shortcuts…</button>
+              <label className="menu-row" title="For iPad and touch screens. With a pencil, a finger moves and zooms the canvas so a resting hand doesn't draw. Two-finger tap undoes, three-finger tap redoes.">
+                Fingers
+                <select value={fingers} onChange={(e) => setFingers(e.target.value as Fingers)}>
+                  <option value="auto">{penSeen ? 'Auto (move the canvas)' : 'Auto (draw until a pencil is used)'}</option>
+                  <option value="draw">Draw</option>
+                  <option value="navigate">Move the canvas</option>
+                </select>
+              </label>
               <button onClick={openProject} title={canSaveToFile() ? 'Open an animation file. Changes then save back to it automatically.' : 'Open an animation saved with Save to file'}>Open from file…</button>
               {canSaveToFile() ? (
                 <>
@@ -652,7 +686,7 @@ export default function App() {
         <button className="btn primary" title="Export the animation as a GIF" onClick={() => { setPlaying(false); setExporting(true); }}>Export</button>
       </header>
 
-      <div className="tool-options">
+      {!panels.hideOptions && <div className="tool-options">
         <span className="tool-name">{TOOLS.find((t) => t.id === tool)?.name}</span>
         {tool === 'brush' && (
           <div className="presets" role="group" aria-label="Brush presets">
@@ -791,9 +825,10 @@ export default function App() {
             {palette.map((c) => (
               <button
                 key={c} className={`swatch${brush.color === c ? ' on' : ''}`} style={{ background: c }} aria-label={`Colour ${c}`}
-                title={`${c}. Right-click to remove it from the palette.`}
+                title={`${c}. Right-click or press and hold to remove it from the palette.`}
+                {...holdSwatch.bind(() => setPalette((p) => (p.length > 1 ? p.filter((x) => x !== c) : p)))}
                 onClick={() => setBrush((b) => ({ ...b, color: c }))}
-                onContextMenu={(e) => { e.preventDefault(); setPalette((p) => (p.length > 1 ? p.filter((x) => x !== c) : p)); }}
+                onContextMenu={(e) => { e.preventDefault(); if (!holdSwatch.justFired()) setPalette((p) => (p.length > 1 ? p.filter((x) => x !== c) : p)); }}
               />
             ))}
             <input className="color-input" type="color" aria-label="Custom colour" title="Pick any colour" value={brush.color} onChange={(e) => setBrush((b) => ({ ...b, color: e.target.value }))} />
@@ -807,7 +842,8 @@ export default function App() {
             )}
           </div>
         )}
-      </div>
+      </div>}
+      <Splitter side="top" label="the tool settings" collapsed={panels.hideOptions} onToggle={() => togglePanel('hideOptions')} />
 
       <div className="workspace">
         {!panels.hideTools && <nav className={`tool-rail${panels.tools >= 100 ? ' wide' : ''}`} aria-label="Tools" style={{ width: panels.tools }}>
@@ -830,6 +866,7 @@ export default function App() {
           selection={selection} onSelectionChange={setSelection} onCommit={onCommit}
           panKey={spaceHeld} onPanned={() => { spacePanned.current = true; }} playing={playing}
           keymap={keymap} symmetry={aids.symmetry} rulers={aids.rulers} onRulersChange={(rulers) => setAids((a) => ({ ...a, rulers }))}
+          touchDraws={touchDraws} onUndo={() => setHistory(undo)} onRedo={() => setHistory(redo)}
           onPickColor={(color) => {
             setBrush((b) => ({ ...b, color }));
             if (tool === 'eyedropper') setTool('brush');
