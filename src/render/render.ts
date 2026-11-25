@@ -710,10 +710,36 @@ const VIEW_BYTES = (IOS ? 48 : 160) * 1024 * 1024;
 const viewPics = new Map<Drawing, Pic | null>();
 let viewKey = '';
 let viewBytes = 0;
+/** Onion skins for the current view: a drawing's view picture in one flat colour. */
+const viewTints = new Map<string, { d: Drawing; pic: Pic | null }>();
 function dropViewPics() {
   for (const p of viewPics.values()) retire(p);
   viewPics.clear();
+  for (const t of viewTints.values()) retire(t.pic);
+  viewTints.clear();
   viewBytes = 0;
+}
+
+/** A drawing redrawn for the view in one flat colour, for onion skins, so they stay sharp when zoomed in. */
+function viewTint(d: Drawing, color: string, m: Matrix, ow: number, oh: number, w: number, h: number): Pic | null {
+  const key = `${d.id}|${color}`;
+  const hit = viewTints.get(key);
+  if (hit && hit.d === d) return hit.pic;
+  if (hit) { viewBytes -= picBytes(hit.pic); retire(hit.pic); }
+  const plain = viewBitmap(d, m, ow, oh, w, h);
+  let pic: Pic | null = null;
+  if (plain) {
+    const c = bitmapCanvas(plain.src.width, plain.src.height);
+    const ctx = c.getContext('2d')!;
+    ctx.drawImage(plain.src, 0, 0);
+    ctx.globalCompositeOperation = 'source-in';
+    ctx.fillStyle = color;
+    ctx.fillRect(0, 0, c.width, c.height);
+    pic = { src: c, x: plain.x, y: plain.y, sheet: true };
+  }
+  viewTints.set(key, { d, pic });
+  viewBytes += picBytes(pic);
+  return pic;
 }
 
 /** A drawing redrawn from its vectors through `m` onto a canvas of ow × oh px. */
@@ -921,7 +947,7 @@ export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, fr
       if (!d || isBlank(d)) return;
       target.globalAlpha = (onion.opacity ?? 0.45) * (1 - (step - 1) / (count + 0.5));
       target.globalCompositeOperation = 'source-over';
-      const t = tintedBitmap(d, color, w, h);
+      const t = view && d.strokes.length ? viewTint(d, color, VC, ow, oh, w, h) : tintedBitmap(d, color, w, h);
       if (t) put(target, t);
     };
     for (let k = onion.before; k >= 1; k--) draw(anchor - k, onion.beforeColor ?? ONION_BEFORE, k, onion.before);

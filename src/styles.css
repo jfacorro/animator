@@ -258,7 +258,10 @@ input[type='checkbox'] { accent-color: var(--accent); }
 .tool-options .hint { color: var(--muted); }
 
 /* Canvas view: zoom, pan, rotate, mirror */
-.canvas-wrap { transform-origin: 50% 50%; will-change: transform; }
+.canvas-wrap { transform-origin: 50% 50%; }
+/* Only while the view is being dragged: a GPU layer moves smoothly, but it stretches what it
+   holds, so the outlines on the canvas (camera box, selection, guides) would blur when zoomed. */
+.stage.grabbing .canvas-wrap { will-change: transform; }
 .stage.pan, .stage.pan canvas { cursor: grab; }
 .stage.grabbing, .stage.grabbing canvas { cursor: grabbing; }
 .view-controls {
