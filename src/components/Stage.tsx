@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { scaleAbout, spansBox, strokeBounds, strokesInLasso, translate, unionBoxes, apply, type Box, type Matrix, type Vec } from '../model/geometry';
-import { addStroke, celIndexAt, drawingAt, replaceStrokes, setPaint, transformStrokes, type FontId, type GrainKind, type Paint, type Point, type Project, type Stroke } from '../model/project';
+import { addStroke, updateLayer, celIndexAt, drawingAt, replaceStrokes, setPaint, transformStrokes, type FontId, type GrainKind, type Paint, type Point, type Project, type Stroke } from '../model/project';
 import { floodFillSpans } from '../render/fill';
 import { catchUp, stabilize } from '../model/brushes';
 import { groupOf } from '../model/groups';
@@ -67,6 +67,8 @@ interface Props {
   onPaintSelectionChange: (outline: Vec[] | null) => void;
   /** Lasso: bend the selection with a 3×3 grid of handles instead of moving it. */
   warp: boolean;
+  /** Brush and eraser paint the active layer's mask instead of the layer. */
+  maskEdit?: boolean;
   /** Apply an edit to the project as one undo step. */
   onCommit: (edit: (p: Project) => Project) => void;
   onPickColor: (color: string) => void;
@@ -151,7 +153,7 @@ function outlineBox(pts: Vec[]): Box {
 /** Drawing outside the frame is shown through this, so the frame's edge stays clear. */
 const OUTSIDE_FRAME = 'rgba(42, 44, 49, 0.72)';
 
-export function Stage({ project, frame, activeLayerId, tool, brush, onion, selection, onSelectionChange, paintSelection, onPaintSelectionChange, warp, onCommit, onPickColor, panKey, onPanned, playing, keymap, symmetry, rulers, onRulersChange, touchDraws, onUndo, onRedo }: Props) {
+export function Stage({ project, frame, activeLayerId, tool, brush, onion, selection, onSelectionChange, paintSelection, onPaintSelectionChange, warp, maskEdit = false, onCommit, onPickColor, panKey, onPanned, playing, keymap, symmetry, rulers, onRulersChange, touchDraws, onUndo, onRedo }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gestureRef = useRef<Gesture | null>(null);
@@ -178,7 +180,9 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   const layer = project.layers.find((l) => l.id === activeLayerId);
   const group = layer ? groupOf(project, layer) : null;
   const isRef = !!layer?.reference;
+  const editingMask = !!maskEdit && !!layer && layer.mask !== undefined && !layer.reference;
   const blocked = !layer ? 'Pick a layer to draw on'
+    : editingMask && EDITS.includes(tool) && tool !== 'brush' && tool !== 'eraser' ? 'You\'re painting the layer mask: the brush hides the layer, the eraser shows it again. Click Done in the layer settings to draw on the layer.'
     : isRef && tool !== 'select' ? 'This is a reference image: pick another layer to draw on. Use the Lasso tool to move or resize it.'
     : (tool === 'smudge' || tool === 'blur') && !layer.paint ? 'Smudge and Blur work on paint layers. Add one with the brush button in Layers.'
     : layer.locked ? 'This layer is locked' : group?.locked ? 'This layer\'s group is locked'
@@ -202,6 +206,8 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     return null;
   };
   /** On an alpha-locked layer, new lines and paint keep to what the drawing already has. */
+  /** A stroke painted on a mask: only its shape counts, so it goes on solid. */
+  const maskStroke = (s: Stroke): Stroke => ({ ...s, color: '#000000', atop: undefined, opacity: s.erase ? undefined : s.opacity });
   const lockStroke = (s: Stroke): Stroke => (layer?.alphaLock && !s.erase ? { ...s, atop: true } : s);
   const scale = display.w / project.width;
   /** Screen px per project px, including zoom. */
@@ -293,9 +299,12 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     }
     if (g?.type === 'warp') shown = warped(g.grid) ?? shown;
     if (g?.type === 'smear' && g.changed) shown = setPaint(project, activeLayerId, frame, livePaint(g.sheet));
-    const live = g && (g.type === 'stroke' || g.type === 'shape' || g.type === 'gradient')
-      ? { layerId: activeLayerId, strokes: symmetricStrokes(g.stroke, symmetry, project.width, project.height).map(lockStroke) } : null;
-    composeFrame(ctx, shown, frame, { paper: true, onion, live, camera: playing, references: !playing });
+    const inProgress = g && (g.type === 'stroke' || g.type === 'shape' || g.type === 'gradient')
+      ? symmetricStrokes(g.stroke, symmetry, project.width, project.height) : null;
+    const live = inProgress && !editingMask ? { layerId: activeLayerId, strokes: inProgress.map(lockStroke) } : null;
+    const liveMask = inProgress && editingMask ? { layerId: activeLayerId, strokes: inProgress.map(maskStroke) } : null;
+    const showMask = editingMask && !playing ? activeLayerId : null;
+    composeFrame(ctx, shown, frame, { paper: true, onion, live, liveMask, showMask, camera: playing, references: !playing });
     const sharp = sharpRef.current;
     if (sharpOn.current && sharp && !playing) {
       const v = sharpView.current;
@@ -312,7 +321,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       sctx.fillStyle = PAPER;
       sctx.fillRect(0, 0, project.width, project.height);
       sctx.restore();
-      composeFrame(sctx, shown, frame, { paper: true, onion, live, references: true, view: v });
+      composeFrame(sctx, shown, frame, { paper: true, onion, live, liveMask, showMask, references: true, view: v });
       // Outside the frame: drawing still shows, but faded, with a line on the frame's edge.
       sctx.save();
       sctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -337,7 +346,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       sctx.restore();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project, frame, onion, activeLayerId, selection, paintSelection, tool, playing, symmetry, imageTick]);
+  }, [project, frame, onion, activeLayerId, selection, paintSelection, tool, editingMask, playing, symmetry, imageTick]);
 
   // Repaint when a reference image finishes loading.
   useEffect(() => onImageLoad(() => setImageTick((t) => t + 1)), []);
@@ -613,6 +622,18 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
 
   /** Add strokes to the drawing here. On a paint layer they're baked into its pixels straight away. */
   const commitStrokes = (all: Stroke[]) => {
+    if (editingMask && layer) {
+      let mask: Paint | null;
+      try {
+        mask = bakePaint(layer.mask ?? undefined, all.map(maskStroke), project.width, project.height);
+      } catch (err) {
+        flash(err instanceof Error ? err.message : 'Could not paint the mask');
+        paint();
+        return;
+      }
+      onCommit((p) => updateLayer(p, activeLayerId, { mask }));
+      return;
+    }
     const strokes = all.map(lockStroke);
     if (!layer?.paint) {
       onCommit((p) => strokes.reduce((q, s) => addStroke(q, activeLayerId, frame, s), p));
