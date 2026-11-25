@@ -175,7 +175,7 @@ them all and lets you change them; your keys are kept in this browser.
 | I | Eyedropper (or Alt+click with a drawing tool) |
 | S | Lasso select: drag to move, corners to resize, Delete to remove, Esc to deselect |
 | K | Camera (Delete removes the key on this frame) |
-| [ / ] | Smaller / bigger brush |
+| [ / ] | Smaller / bigger size for the current tool (brush, eraser, shapes, Liquify, text) |
 | Y | Symmetry: off → left–right → top–bottom → both |
 | Shift+R | Rulers and guides on / off |
 | N | New drawing after the current one |

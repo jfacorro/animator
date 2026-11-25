@@ -95,6 +95,22 @@ const AIDS_KEY = 'animator:aids';
 const SYMMETRY: { id: Symmetry; name: string }[] = [
   { id: 'off', name: 'Off' }, { id: 'x', name: 'Left–right' }, { id: 'y', name: 'Top–bottom' }, { id: 'xy', name: 'Both' },
 ];
+/** The size each tool's [ and ] change, and its range. */
+type SizeKey = 'size' | 'eraserSize' | 'liquifySize' | 'textSize';
+const SIZED: Partial<Record<Tool, { key: SizeKey; min: number; max: number }>> = {
+  brush: { key: 'size', min: 1, max: 60 },
+  line: { key: 'size', min: 1, max: 60 },
+  rect: { key: 'size', min: 1, max: 60 },
+  ellipse: { key: 'size', min: 1, max: 60 },
+  eraser: { key: 'eraserSize', min: 1, max: 120 },
+  liquify: { key: 'liquifySize', min: 10, max: 400 },
+  text: { key: 'textSize', min: 8, max: 240 },
+};
+/** One step smaller or bigger: 1 px for thin sizes, about a tenth for big ones, so every range takes a similar number of presses. */
+function stepSize(v: number, r: { min: number; max: number }, bigger: boolean): number {
+  const step = Math.max(1, Math.round(v * 0.1));
+  return Math.min(r.max, Math.max(r.min, bigger ? v + step : v - step));
+}
 const isHex = (c: unknown) => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c);
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 
@@ -543,8 +559,10 @@ export default function App() {
       else if (action === 'frame.new') newDrawing();
       else if (action === 'frame.duplicate') duplicate();
       else if (action === 'onion.toggle') setOnion((o) => ({ ...o, enabled: !o.enabled }));
-      else if (action === 'brush.smaller') setBrush((b) => (tool === 'eraser' ? { ...b, eraserSize: Math.max(2, b.eraserSize - 2) } : { ...b, size: Math.max(1, b.size - 1) }));
-      else if (action === 'brush.bigger') setBrush((b) => (tool === 'eraser' ? { ...b, eraserSize: Math.min(120, b.eraserSize + 2) } : { ...b, size: Math.min(60, b.size + 1) }));
+      else if (action === 'brush.smaller' || action === 'brush.bigger') {
+        const sz = SIZED[tool];
+        if (sz) setBrush((b) => ({ ...b, [sz.key]: stepSize(b[sz.key] ?? sz.min, sz, action === 'brush.bigger') }));
+      }
     };
     // Space plays on release, unless it was held to pan the canvas.
     const onKeyUp = (e: KeyboardEvent) => {
@@ -736,7 +754,7 @@ export default function App() {
         )}
         {tool === 'liquify' && (
           <>
-            <label title="How wide an area moves with the pointer">Size
+            <label title="How wide an area moves with the pointer ([ and ] to change)">Size
               <input type="range" min={10} max={400} value={liquifySize} onChange={(e) => setBrush((b) => ({ ...b, liquifySize: Number(e.target.value) }))} />
               <span className="value">{liquifySize} px</span>
             </label>
@@ -806,7 +824,7 @@ export default function App() {
                 {Object.entries(FONTS).map(([id, f]) => <option key={id} value={id} style={{ fontFamily: f.css }}>{f.name}</option>)}
               </select>
             </label>
-            <label title="Size of the letters in pixels">Size
+            <label title="Size of the letters in pixels ([ and ] to change)">Size
               <input type="range" min={8} max={240} value={brush.textSize} onChange={(e) => setBrush((b) => ({ ...b, textSize: Number(e.target.value) }))} />
               <span className="value">{brush.textSize} px</span>
             </label>
