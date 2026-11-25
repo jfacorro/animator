@@ -750,15 +750,22 @@ export default function App() {
           onChange={(e) => apply((p) => ({ ...p, name: e.target.value }), false)}
           onBlur={(e) => apply((p) => ({ ...p, name: e.target.value.trim() || 'Untitled animation' }))}
         />
-        {fileLinked && (
-          fileStatus === 'paused' ? (
-            <button className="file-status paused" title={`Auto-save to ${fileLinked.handle.name} is paused until you allow it again. Your work is still saved in this browser.`} onClick={resumeFileSave}>Resume saving to file</button>
+        {fileLinked && (() => {
+          const name = fileLinked.handle.name;
+          const icon = fileStatus === 'saving' ? <I.Spinner /> : fileStatus === 'error' ? <I.Warning /> : fileStatus === 'paused' ? <I.PauseSmall /> : <I.Check />;
+          const state = fileStatus === 'saving' ? 'Saving…' : fileStatus === 'error' ? "Couldn't save" : fileStatus === 'paused' ? 'Auto-save paused' : 'Saved';
+          const body = (
+            <>
+              <span className="save-icon" role="img" aria-label={state}>{icon}</span>
+              <span className="file-name">{name}</span>
+            </>
+          );
+          return fileStatus === 'paused' ? (
+            <button className="file-status paused" title={`Auto-save to ${name} is paused. Click to allow it again. Your work is still saved in this browser.`} onClick={resumeFileSave}>{body}</button>
           ) : (
-            <span className={`file-status ${fileStatus}`} title={`Every change saves to ${fileLinked.handle.name} automatically`}>
-              {fileStatus === 'saving' ? 'Saving…' : fileStatus === 'error' ? `Couldn't save to ${fileLinked.handle.name}` : `Saved to ${fileLinked.handle.name}`}
-            </span>
-          )
-        )}
+            <span className={`file-status ${fileStatus}`} role="status" title={`${state}. Every change saves to ${name} automatically.`}>{body}</span>
+          );
+        })()}
         <div className="spacer" />
         <div className="transport">
           <button className="icon-btn" aria-label="First frame" title="First frame (Home)" onClick={() => goTo(0)}><I.First /></button>
