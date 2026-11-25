@@ -102,7 +102,9 @@ npm run build    # static site in dist/
 
 ## Panels
 
-Drag the thin line on the edge of the tools, layers panel or timeline to resize it. Double-click the line, or use its arrow button, to hide that panel; click the strip left behind to bring it back. Sizes are remembered in this browser.
+Drag the thin line on the edge of the tools, layers panel or timeline to resize it. Double-click the line, or use its arrow button, to hide that panel; click the strip left behind to bring it back. Sizes are remembered in this browser. The tool settings bar under the top bar hides the same way, and Tab hides or shows everything at once.
+
+On a phone or small window the app starts with the layers panel hidden and a short timeline, and the bars scroll sideways instead of wrapping.
 
 ## iPad and Apple Pencil
 

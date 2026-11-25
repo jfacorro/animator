@@ -413,3 +413,33 @@ button.file-status.paused {
   .swatch { width: 26px; height: 26px; }
   input[type='range'] { min-height: 30px; }
 }
+
+/* The tool settings bar only hides (no resizing). */
+.splitter.fixed { cursor: default; }
+.splitter.horizontal.fixed:not(.collapsed) { height: 1px; }
+
+/* Touch screens have no hover: keep the panel hide/show buttons visible and easy to hit. */
+@media (pointer: coarse) {
+  .splitter-btn { opacity: 1; }
+  .splitter.vertical .splitter-btn { width: 18px; height: 44px; }
+  .splitter.horizontal .splitter-btn { width: 44px; height: 18px; }
+  .splitter.vertical.collapsed { width: 20px; }
+  .splitter.horizontal.collapsed { height: 20px; }
+}
+
+/* Phones and small windows: one row for each bar, scrolling sideways instead of wrapping. */
+@media (max-width: 900px), (max-height: 520px) {
+  .topbar, .tool-options { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .topbar::-webkit-scrollbar, .tool-options::-webkit-scrollbar { display: none; }
+  .topbar > *, .tool-options > * { flex-shrink: 0; }
+  .topbar { min-height: 0; gap: 8px; padding: 4px 8px; }
+  .tool-options { min-height: 0; gap: 12px; padding: 4px 10px; }
+  .tool-options .hint, .file-status, .brand-name { display: none; }
+  .topbar .spacer { flex: 0 0 4px; }
+  .project-name { width: 130px; }
+  .timeline-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 4px 8px; gap: 8px; }
+  .timeline-bar::-webkit-scrollbar { display: none; }
+  .timeline-bar > * { flex-shrink: 0; }
+  .track-names { width: 110px; }
+  .view-controls { right: 6px; bottom: 6px; max-width: calc(100% - 12px); overflow-x: auto; }
+}

@@ -59,8 +59,13 @@ interface Panels {
   hideTools: boolean;
   hideLayers: boolean;
   hideTimeline: boolean;
+  /** The bar with the current tool's settings, under the top bar. */
+  hideOptions: boolean;
 }
-const DEFAULT_PANELS: Panels = { tools: 60, layers: 280, timeline: 220, hideTools: false, hideLayers: false, hideTimeline: false };
+const DEFAULT_PANELS: Panels = { tools: 60, layers: 280, timeline: 220, hideTools: false, hideLayers: false, hideTimeline: false, hideOptions: false };
+/** A phone, or a small window: start with the layers panel hidden and a short timeline. */
+const smallScreen = () => typeof window !== 'undefined' && (window.innerWidth < 760 || window.innerHeight < 520);
+const COMPACT_PANELS: Partial<Panels> = { layers: 220, timeline: 110, hideLayers: true };
 const PANEL_LIMITS = { tools: [52, 160], layers: [200, 560], timeline: [110, 640] } as const;
 const clampPanel = (k: keyof typeof PANEL_LIMITS, v: number) => Math.round(Math.min(PANEL_LIMITS[k][1], Math.max(PANEL_LIMITS[k][0], v)));
 const MAX_PALETTE = 24;
@@ -177,7 +182,7 @@ export default function App() {
   const keyHint = (id: ActionId) => (keymap[id] ? ` (${displayKey(keymap[id])})` : '');
 
   const length = P.sceneLength(project);
-  const [panels, setPanels] = useState<Panels>(() => ({ ...DEFAULT_PANELS, ...loadPref<Partial<Panels>>(PANELS_KEY, {}, (v) => typeof v === 'object') }));
+  const [panels, setPanels] = useState<Panels>(() => ({ ...DEFAULT_PANELS, ...(smallScreen() ? COMPACT_PANELS : {}), ...loadPref<Partial<Panels>>(PANELS_KEY, {}, (v) => typeof v === 'object') }));
   useEffect(() => { savePref(PANELS_KEY, panels); }, [panels]);
   /** Panel size when a resize drag started. */
   const panelStart = useRef<Panels | null>(null);
@@ -187,7 +192,7 @@ export default function App() {
     setPanels((p) => ({ ...p, [k]: clampPanel(k, base + grow) }));
     if (done) panelStart.current = null;
   };
-  const togglePanel = (k: 'hideTools' | 'hideLayers' | 'hideTimeline') => setPanels((p) => ({ ...p, [k]: !p[k] }));
+  const togglePanel = (k: 'hideTools' | 'hideLayers' | 'hideTimeline' | 'hideOptions') => setPanels((p) => ({ ...p, [k]: !p[k] }));
   const [scrub, setScrub] = useState(() => loadPref(SCRUB_KEY, true, (v) => typeof v === 'boolean'));
   useEffect(() => { savePref(SCRUB_KEY, scrub); }, [scrub]);
   useAudioPlayback(project, frame, playing, scrub);
@@ -479,8 +484,8 @@ export default function App() {
       if (key === 'tab' && !e.shiftKey) {
         e.preventDefault();
         setPanels((p) => {
-          const anyShown = !p.hideTools || !p.hideLayers || !p.hideTimeline;
-          return { ...p, hideTools: anyShown, hideLayers: anyShown, hideTimeline: anyShown };
+          const anyShown = !p.hideTools || !p.hideLayers || !p.hideTimeline || !p.hideOptions;
+          return { ...p, hideTools: anyShown, hideLayers: anyShown, hideTimeline: anyShown, hideOptions: anyShown };
         });
         return;
       }
@@ -603,7 +608,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand"><I.Logo /> Animator</div>
+        <div className="brand"><I.Logo /> <span className="brand-name">Animator</span></div>
         <input
           className="project-name" type="text" aria-label="Animation name" title="Name of this animation, used for exported files" value={project.name}
           onChange={(e) => apply((p) => ({ ...p, name: e.target.value }), false)}
@@ -681,7 +686,7 @@ export default function App() {
         <button className="btn primary" title="Export the animation as a GIF" onClick={() => { setPlaying(false); setExporting(true); }}>Export</button>
       </header>
 
-      <div className="tool-options">
+      {!panels.hideOptions && <div className="tool-options">
         <span className="tool-name">{TOOLS.find((t) => t.id === tool)?.name}</span>
         {tool === 'brush' && (
           <div className="presets" role="group" aria-label="Brush presets">
@@ -837,7 +842,8 @@ export default function App() {
             )}
           </div>
         )}
-      </div>
+      </div>}
+      <Splitter side="top" label="the tool settings" collapsed={panels.hideOptions} onToggle={() => togglePanel('hideOptions')} />
 
       <div className="workspace">
         {!panels.hideTools && <nav className={`tool-rail${panels.tools >= 100 ? ' wide' : ''}`} aria-label="Tools" style={{ width: panels.tools }}>

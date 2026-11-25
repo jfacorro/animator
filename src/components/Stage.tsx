@@ -161,7 +161,8 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     const el = wrapRef.current;
     if (!el) return;
     const fit = () => {
-      const pad = 48;
+      // Less margin around the canvas on a phone, where every pixel counts.
+      const pad = Math.min(el.clientWidth, el.clientHeight) < 420 ? 16 : 48;
       const aw = Math.max(100, el.clientWidth - pad);
       const ah = Math.max(100, el.clientHeight - pad);
       const s = Math.min(aw / project.width, ah / project.height);
