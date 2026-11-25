@@ -22,7 +22,7 @@ npm run build    # static site in dist/
 ## Online
 
 Every merge to `main` publishes the app to GitHub Pages
-(https://jfacorro.github.io/animator/) through `.github/workflows/pages.yml`.
+(https://juan.facorro.com/animator/) through `.github/workflows/pages.yml`.
 Once opened there, it also opens without a connection, and *Add to Home Screen*
 on an iPhone or iPad gives a full-screen app. Drawings are kept in the browser
 you use them in: to move an animation between devices or browsers, use
