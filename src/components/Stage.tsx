@@ -874,9 +874,10 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     // The brush outline follows a mouse, or an Apple Pencil hovering over the screen; never a finger.
+    // It's kept in screen px within the stage and drawn outside the zoomed canvas, so it stays sharp at any zoom.
     if (e.pointerType !== 'touch') {
-      const [cx, cy] = toLocal(e);
-      setCursor({ x: cx, y: cy });
+      const r = wrapRef.current!.getBoundingClientRect();
+      setCursor({ x: e.clientX - r.left, y: e.clientY - r.top });
     }
     if (vpDrag && vpDrag.pointerId === e.pointerId) {
       const [x, y] = toPoint(e, false);
@@ -1153,7 +1154,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   const camCorners = camView ? cameraCorners(camView, project.width, project.height) : null;
   const camActive = tool === 'camera';
   const showBrushCursor = (tool === 'brush' || tool === 'eraser' || tool === 'liquify' || tool === 'smudge' || tool === 'blur') && cursor && !blocked && !panKey && !navigating;
-  const cursorSize = (tool === 'eraser' ? brush.eraserSize : tool === 'liquify' ? brush.liquifySize ?? 80 : tool === 'smudge' || tool === 'blur' ? brush.fxSize ?? 40 : brush.size) * scale;
+  const cursorSize = (tool === 'eraser' ? brush.eraserSize : tool === 'liquify' ? brush.liquifySize ?? 80 : tool === 'smudge' || tool === 'blur' ? brush.fxSize ?? 40 : brush.size) * scale * view.zoom;
   const canvasClass = tool === 'camera' ? 'camera' : tool === 'eyedropper' ? 'pick' : blocked && EDITS.includes(tool) ? 'blocked' : tool === 'fill' ? 'fill' : tool === 'text' ? 'text' : tool === 'select' ? `select${selHover ? ` ${selHover}` : ''}` : 'draw';
   const hs = 10 / vs; // handle size in project px
 
@@ -1312,13 +1313,13 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
             onBlur={commitText}
           />
         )}
-        {showBrushCursor && cursorSize > 4 && (
-          <div
-            className="brush-cursor"
-            style={{ width: cursorSize, height: cursorSize, left: cursor.x - cursorSize / 2, top: cursor.y - cursorSize / 2 }}
-          />
-        )}
       </div>
+      {showBrushCursor && cursorSize > 4 && (
+        <div
+          className="brush-cursor"
+          style={{ width: cursorSize, height: cursorSize, left: cursor.x - cursorSize / 2, top: cursor.y - cursorSize / 2 }}
+        />
+      )}
       {rulers && !playing && (
         <>
           <div
