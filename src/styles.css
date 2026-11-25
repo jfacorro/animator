@@ -35,9 +35,15 @@ button:disabled { cursor: default; opacity: 0.45; }
 
 .app {
   height: 100%; display: flex; flex-direction: column;
-  /* Room for the iPad's rounded corners and home bar when added to the Home Screen. */
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  /* Room for rounded corners and the home bar. The sides (a phone's notch in landscape) are
+     filled by the panels themselves below, so no blank strip is left there. */
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
 }
+.topbar, .tool-options, .timeline-bar { padding-left: calc(12px + var(--safe-l)) !important; padding-right: calc(12px + var(--safe-r)) !important; }
+.workspace { padding-left: var(--safe-l); padding-right: var(--safe-r); background: var(--panel); }
+.timeline-wrap { padding-left: var(--safe-l); padding-right: var(--safe-r); background: var(--panel-2); }
 
 /* Buttons */
 .btn {
