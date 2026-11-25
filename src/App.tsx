@@ -20,6 +20,7 @@ import { cameraAt, hasCamera, keyAt, removeCameraKey, setCameraKey } from './mod
 import { readAudioFile, useAudioPlayback } from './audio';
 import { matchingPreset, PRESETS, validBrush, type BrushPreset } from './model/brushes';
 import { BrushEditor } from './components/BrushEditor';
+import { BrushSample } from './components/BrushSample';
 import {
   canSaveToFile, filePermission, loadCurrentProject, loadLinkedFile, pickOpenFile, pickSaveFile, readProjectFile, rememberLinkedFile,
   saveCurrentProject, saveProjectFile, writeProjectFile, type LinkedFile,
@@ -74,7 +75,7 @@ const DEFAULT_PANELS: Panels = { options: 230, layers: 280, timeline: 220, hideT
 /** A phone, or a small window: start with the layers panel hidden and a short timeline. */
 const smallScreen = () => typeof window !== 'undefined' && (window.innerWidth < 760 || window.innerHeight < 520);
 const COMPACT_PANELS: Partial<Panels> = { options: 170, layers: 220, timeline: 110, hideLayers: true };
-const PANEL_LIMITS = { options: [130, 420], layers: [200, 560], timeline: [110, 640] } as const;
+const PANEL_LIMITS = { options: [80, 420], layers: [200, 560], timeline: [110, 640] } as const;
 const clampPanel = (k: keyof typeof PANEL_LIMITS, v: number) => Math.round(Math.min(PANEL_LIMITS[k][1], Math.max(PANEL_LIMITS[k][0], v)));
 const MAX_PALETTE = 24;
 
@@ -783,14 +784,13 @@ export default function App() {
 
       <div className="workspace">
       {!panels.hideOptions && <div className="tool-options" role="region" aria-label="Tool settings" style={{ width: panels.options }}>
-        <span className="tool-name">{TOOLS.find((t) => t.id === tool)?.name}</span>
+        <span className="tool-name">{TOOLS.find((t) => t.id === tool)?.name}{tool === 'brush' && <span className="muted" title={preset ? undefined : "You've changed the settings of a preset"}> · {preset?.name ?? 'Custom'}</span>}</span>
         {tool === 'brush' && (
           <div className="presets" role="group" aria-label="Brush presets">
             {[...PRESETS, ...savedBrushes].map((p) => (
-              <button key={p.id} className={`btn small${preset?.id === p.id ? ' on' : ''}`} aria-pressed={preset?.id === p.id} title={`${p.name}: ${p.help}`} onClick={() => usePreset(p)}>{p.name}</button>
+              <button key={p.id} className={`brush-btn${preset?.id === p.id ? ' on' : ''}`} aria-label={p.name} aria-pressed={preset?.id === p.id} title={`${p.name}: ${p.help}`} onClick={() => usePreset(p)}><BrushSample brush={p} /></button>
             ))}
-            {!preset && <span className="hint" title="You've changed the settings of a preset">Custom</span>}
-            <button className="btn small" title="Brush editor: every setting, paper grain, and saving your own brushes" onClick={() => setBrushEditor(true)}>Edit…</button>
+            <button className="brush-btn" aria-label="Edit brush" title="Brush editor: every setting, paper grain, and saving your own brushes" onClick={() => setBrushEditor(true)}><I.Sliders /></button>
           </div>
         )}
         {(tool === 'brush' || tool === 'eraser' || tool === 'line' || tool === 'rect' || tool === 'ellipse') && !(brush.fillShapes && (tool === 'rect' || tool === 'ellipse')) && (

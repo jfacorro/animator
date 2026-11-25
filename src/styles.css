@@ -91,7 +91,7 @@ input[type='checkbox'] { accent-color: var(--accent); }
 
 /* Tool settings: a column on the left, one setting under another */
 .tool-options {
-  flex-shrink: 0; min-height: 0; display: flex; flex-direction: column; align-items: stretch; gap: 14px; padding: 12px 14px 16px;
+  flex-shrink: 0; min-height: 0; display: flex; flex-direction: column; align-items: stretch; gap: 14px; padding: 12px 10px 16px;
   background: var(--panel-2); color: var(--muted); overflow-y: auto; overflow-x: hidden;
 }
 .tool-options label { display: flex; align-items: center; gap: 8px; }
@@ -300,9 +300,27 @@ button.file-status.paused {
 /* Brushes and palette */
 .presets { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 /* In the narrow settings panel the presets share the width and wrap onto as many lines as they need. */
-.tool-options .presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); }
-.tool-options .presets .btn { min-width: 0; padding: 0 6px; justify-content: center; overflow: hidden; text-overflow: ellipsis; }
-.tool-options .presets .hint { grid-column: 1 / -1; }
+.tool-options .presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 4px; }
+.brush-btn {
+  height: 34px; min-width: 0; padding: 0; border-radius: 7px; border: 1px solid var(--border-2); background: var(--control);
+  color: var(--text); display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.brush-btn:hover { border-color: #555962; }
+.brush-btn.on { border-color: var(--accent); background: var(--accent-soft); }
+.brush-sample { display: block; pointer-events: none; }
+/* A very narrow panel: everything stacks, one thing per line. */
+.tool-options { container-type: inline-size; }
+@container (max-width: 140px) {
+  .tool-options label:has(> input[type=range]) { grid-template-columns: minmax(0, 1fr); }
+  .tool-options label > .value { grid-row: auto; grid-column: 1; text-align: left; }
+  .tool-options label > input[type=range] { grid-row: auto; order: 1; }
+  .tool-options label, .tool-options .swatches, .tool-options .btn { font-size: 11px; }
+  .tool-options label { flex-wrap: wrap; column-gap: 4px; }
+  .tool-options label:has(> select) { flex-direction: column; align-items: stretch; }
+  .tool-options .swatch { width: 18px; height: 18px; }
+  .tool-options .color-input { width: 22px; height: 22px; }
+  .tool-name { font-size: 13px; overflow-wrap: anywhere; }
+}
 .link-btn { border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline; padding: 0; }
 .link-btn:hover { color: var(--text); }
 .swatches .icon-btn.sm:disabled { opacity: 0.35; }
@@ -469,3 +487,4 @@ button.file-status.paused {
 .row-input { display: inline-flex; align-items: center; gap: 8px; }
 .row-input input[type=range] { width: 140px; }
 .brush-editor .dialog-foot input[type=text] { flex: 1; min-width: 0; max-width: 220px; }
+.tool-name .muted { font-weight: 400; }
