@@ -2,7 +2,7 @@
 
 export type ActionId =
   | 'tool.brush' | 'tool.eraser' | 'tool.line' | 'tool.rect' | 'tool.ellipse' | 'tool.fill' | 'tool.text'
-  | 'tool.eyedropper' | 'tool.select' | 'tool.liquify' | 'tool.camera'
+  | 'tool.eyedropper' | 'tool.select' | 'tool.liquify' | 'tool.smudge' | 'tool.blur' | 'tool.camera'
   | 'frame.prev' | 'frame.next' | 'frame.new' | 'frame.duplicate' | 'onion.toggle'
   | 'brush.smaller' | 'brush.bigger' | 'symmetry.next' | 'rulers.toggle'
   | 'view.zoomIn' | 'view.zoomOut' | 'view.fit' | 'view.actual' | 'view.rotateLeft' | 'view.rotateRight' | 'view.straighten' | 'view.mirror';
@@ -25,14 +25,16 @@ export const ACTIONS: ActionDef[] = [
   { id: 'tool.eyedropper', label: 'Eyedropper', group: 'Tools', key: 'i' },
   { id: 'tool.select', label: 'Lasso select', group: 'Tools', key: 's' },
   { id: 'tool.liquify', label: 'Liquify', group: 'Tools', key: 'w' },
+  { id: 'tool.smudge', label: 'Smudge', group: 'Tools', key: 'u' },
+  { id: 'tool.blur', label: 'Blur', group: 'Tools', key: 'j' },
   { id: 'tool.camera', label: 'Camera', group: 'Tools', key: 'k' },
   { id: 'frame.prev', label: 'Previous frame', group: 'Frames', key: ',' },
   { id: 'frame.next', label: 'Next frame', group: 'Frames', key: '.' },
   { id: 'frame.new', label: 'New drawing', group: 'Frames', key: 'n' },
   { id: 'frame.duplicate', label: 'Duplicate drawing', group: 'Frames', key: 'd' },
   { id: 'onion.toggle', label: 'Onion skin on / off', group: 'Frames', key: 'o' },
-  { id: 'brush.smaller', label: 'Smaller size (brush, eraser, shapes, Liquify, text)', group: 'Drawing', key: '[' },
-  { id: 'brush.bigger', label: 'Bigger size (brush, eraser, shapes, Liquify, text)', group: 'Drawing', key: ']' },
+  { id: 'brush.smaller', label: 'Smaller size (brush, eraser, shapes, Liquify, Smudge, Blur, text)', group: 'Drawing', key: '[' },
+  { id: 'brush.bigger', label: 'Bigger size (brush, eraser, shapes, Liquify, Smudge, Blur, text)', group: 'Drawing', key: ']' },
   { id: 'symmetry.next', label: 'Switch symmetry', group: 'Drawing', key: 'y' },
   { id: 'rulers.toggle', label: 'Rulers and guides on / off', group: 'Drawing', key: 'shift+r' },
   { id: 'view.zoomIn', label: 'Zoom in', group: 'View', key: '=' },

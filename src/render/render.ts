@@ -951,3 +951,65 @@ export function warpPaintRegion(sheet: HTMLCanvasElement, region: [number, numbe
   }
   return out;
 }
+
+/** A round, soft-edged mask of radius r on a 2r × 2r canvas, at `alpha` in the middle. */
+function softDab(r: number, alpha: number): HTMLCanvasElement {
+  const size = Math.max(2, Math.ceil(r * 2));
+  const c = makeCanvas(size, size);
+  const ctx = c.getContext('2d')!;
+  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  g.addColorStop(0, `rgba(0,0,0,${alpha})`);
+  g.addColorStop(0.5, `rgba(0,0,0,${alpha * 0.8})`);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  return c;
+}
+
+/**
+ * Mix `patch` (2r × 2r, already masked) into `sheet` centred on `at`: where the
+ * patch's mask is strong the patch replaces the sheet, fading to no change.
+ */
+function mixInto(sheet: HTMLCanvasElement, patch: HTMLCanvasElement, mask: HTMLCanvasElement, at: [number, number]) {
+  const ctx = sheet.getContext('2d')!;
+  const x = Math.round(at[0] - mask.width / 2), y = Math.round(at[1] - mask.height / 2);
+  ctx.save();
+  // Take away as much of the old colour as the new one brings…
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.drawImage(mask, x, y);
+  // …and add the new one (premultiplied, so the two add up exactly).
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.drawImage(patch, x, y);
+  ctx.restore();
+}
+
+/** The sheet's pixels in a 2r × 2r square around `at`, cut to `mask`. */
+function grab(sheet: HTMLCanvasElement, at: [number, number], mask: HTMLCanvasElement, filter?: string): HTMLCanvasElement {
+  const c = makeCanvas(mask.width, mask.height);
+  const ctx = c.getContext('2d')!;
+  if (filter && 'filter' in ctx) ctx.filter = filter;
+  ctx.drawImage(sheet, -Math.round(at[0] - mask.width / 2), -Math.round(at[1] - mask.height / 2));
+  ctx.filter = 'none';
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.drawImage(mask, 0, 0);
+  return c;
+}
+
+/** Smudge on paint: drag the colour under the brush from `from` towards `to`, like a finger. */
+export function smudgeStep(sheet: HTMLCanvasElement, from: [number, number], to: [number, number], radius: number, strength: number) {
+  const dist = Math.hypot(to[0] - from[0], to[1] - from[1]);
+  const step = Math.max(1, radius / 4);
+  const n = Math.max(1, Math.ceil(dist / step));
+  const mask = softDab(radius, strength);
+  for (let i = 1; i <= n; i++) {
+    const a: [number, number] = [from[0] + ((to[0] - from[0]) * (i - 1)) / n, from[1] + ((to[1] - from[1]) * (i - 1)) / n];
+    const b: [number, number] = [from[0] + ((to[0] - from[0]) * i) / n, from[1] + ((to[1] - from[1]) * i) / n];
+    mixInto(sheet, grab(sheet, a, mask), mask, b);
+  }
+}
+
+/** Blur on paint: soften the paint under the brush. */
+export function blurStep(sheet: HTMLCanvasElement, at: [number, number], radius: number, strength: number) {
+  const mask = softDab(radius, strength);
+  mixInto(sheet, grab(sheet, at, mask, `blur(${Math.max(1, radius / 6).toFixed(1)}px)`), mask, at);
+}

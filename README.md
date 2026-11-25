@@ -138,6 +138,9 @@ really removes paint. On a paint layer the Lasso selects an area of pixels:
 drag it to move, drag a corner to resize, or Flip, Duplicate or Delete it.
 Paint can't be copied to another frame yet; Duplicate repeats a paint drawing.
 
+**Smudge** (U) drags colours into each other and **Blur** (J) softens paint
+under the brush; both work on paint layers, with their own size and strength.
+
 **Alpha lock** (in the layer settings) keeps new paint to where the layer
 already has paint, for shading and recolouring without going over the edges.
 The eraser still erases. It works on line layers too: new lines only show
@@ -179,7 +182,7 @@ them all and lets you change them; your keys are kept in this browser.
 | I | Eyedropper (or Alt+click with a drawing tool) |
 | S | Lasso select: drag to move, corners to resize, Delete to remove, Esc to deselect |
 | K | Camera (Delete removes the key on this frame) |
-| [ / ] | Smaller / bigger size for the current tool (brush, eraser, shapes, Liquify, text) |
+| [ / ] | Smaller / bigger size for the current tool (brush, eraser, shapes, Liquify, Smudge, Blur, text) |
 | Y | Symmetry: off → left–right → top–bottom → both |
 | Shift+R | Rulers and guides on / off |
 | N | New drawing after the current one |
