@@ -113,6 +113,7 @@ input[type='checkbox'] { accent-color: var(--accent); }
 
 .stage { flex: 1; min-width: 0; position: relative; background: var(--stage); display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .stage canvas { display: block; background: #fbfaf7; box-shadow: 0 1px 0 #0006, 0 8px 30px #0004; touch-action: none; }
+.stage canvas.sharp { position: absolute; left: 0; top: 0; background: none; box-shadow: none; pointer-events: none; visibility: hidden; }
 .stage canvas.draw { cursor: crosshair; }
 .stage canvas.blocked { cursor: not-allowed; }
 .stage-note {

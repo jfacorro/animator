@@ -5,7 +5,7 @@ import { floodFillSpans } from '../render/fill';
 import { catchUp, stabilize } from '../model/brushes';
 import { groupOf } from '../model/groups';
 import { cameraAt, cameraCorners, hasCamera, setCameraKey, type CameraView } from '../model/camera';
-import { bakePaint, composeFrame, paintReady, fontCss, LINE_HEIGHT, measureText, onImageLoad, paintSource, paintStroke, selectionMask, type OnionOptions } from '../render/render';
+import { bakePaint, composeFrame, mulMatrix, PAPER, paintReady, fontCss, LINE_HEIGHT, measureText, onImageLoad, paintSource, paintStroke, selectionMask, type OnionOptions } from '../render/render';
 import { placeReference, rulerStep, snapToGuides, symmetricStrokes, type GuideAxis, type Symmetry } from '../model/aids';
 import { addGuide, moveGuide, removeGuide } from '../model/aids';
 import { tapDown, tapMove, tapUp, type Taps } from '../model/taps';
@@ -192,6 +192,36 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   sameExceptFrame.current = otherDeps.every((d, i) => d === prevDeps.current[i]);
   prevDeps.current = otherDeps;
 
+  // A second canvas over the stage, at screen resolution, that redraws line
+  // layers from their vectors so they stay sharp at any zoom. The project-size
+  // canvas under it is what shows while you zoom, pan or play; the sharp one
+  // takes over once the view has been still for a moment.
+  const sharpRef = useRef<HTMLCanvasElement>(null);
+  const sharpOn = useRef(false);
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+  const sharpView = useRef({ matrix: [1, 0, 0, 1, 0, 0] as Matrix, width: 1, height: 1 });
+  {
+    // Project px → sharp canvas px: the same placement as the canvas's CSS transform.
+    const r = (view.rotation * Math.PI) / 180;
+    const cos = Math.cos(r), sin = Math.sin(r);
+    const fz = (view.flip ? -1 : 1) * view.zoom * scale;
+    const z = view.zoom * scale;
+    const toStage: Matrix = mulMatrix(
+      [cos, sin, -sin, cos, stageSize.w / 2 + view.x, stageSize.h / 2 + view.y],
+      [fz, 0, 0, z, -fz * project.width / 2, -z * project.height / 2],
+    );
+    sharpView.current = {
+      matrix: mulMatrix([dpr, 0, 0, dpr, 0, 0], toStage),
+      width: Math.max(1, Math.round(stageSize.w * dpr)),
+      height: Math.max(1, Math.round(stageSize.h * dpr)),
+    };
+  }
+  const showSharp = (on: boolean) => {
+    sharpOn.current = on;
+    if (sharpRef.current) sharpRef.current.style.visibility = on ? 'visible' : 'hidden';
+    if (canvasRef.current) canvasRef.current.style.opacity = on ? '0' : '';
+  };
+
   const paint = useCallback(() => {
     const ctx = canvasRef.current?.getContext('2d');
     if (!ctx) return;
@@ -205,6 +235,24 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     const live = g && (g.type === 'stroke' || g.type === 'shape' || g.type === 'gradient')
       ? { layerId: activeLayerId, strokes: symmetricStrokes(g.stroke, symmetry, project.width, project.height) } : null;
     composeFrame(ctx, shown, frame, { paper: true, onion, live, camera: playing, references: !playing });
+    const sharp = sharpRef.current;
+    if (sharpOn.current && sharp && !playing) {
+      const v = sharpView.current;
+      if (sharp.width !== v.width || sharp.height !== v.height) { sharp.width = v.width; sharp.height = v.height; }
+      const sctx = sharp.getContext('2d')!;
+      sctx.setTransform(1, 0, 0, 1, 0, 0);
+      sctx.clearRect(0, 0, v.width, v.height);
+      // The page and its shadow, as the stage canvas has in CSS.
+      sctx.save();
+      sctx.setTransform(...v.matrix);
+      sctx.shadowColor = '#0000004d';
+      sctx.shadowBlur = 30 * dpr;
+      sctx.shadowOffsetY = 8 * dpr;
+      sctx.fillStyle = PAPER;
+      sctx.fillRect(0, 0, project.width, project.height);
+      sctx.restore();
+      composeFrame(sctx, shown, frame, { paper: true, onion, live, references: true, view: v });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project, frame, onion, activeLayerId, selection, playing, symmetry, imageTick]);
 
@@ -223,6 +271,24 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   }, [paint, project, frame, playing]);
 
   useEffect(() => () => cancelAnimationFrame(rafRef.current), []);
+
+  // The sharp canvas only matches one view: hide it while the view moves, and
+  // redraw it once things settle. Playback always uses the fast canvas.
+  const paintRef = useRef(paint);
+  paintRef.current = paint;
+  const sv = sharpView.current;
+  const sharpKey = `${sv.matrix.join(',')}|${sv.width}x${sv.height}|${playing}`;
+  useLayoutEffect(() => {
+    showSharp(false);
+    if (playing) return;
+    const t = window.setTimeout(() => {
+      sharpOn.current = true;
+      paintRef.current();
+      showSharp(true);
+    }, 150);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sharpKey]);
 
   // A new or opened animation starts fitted to the screen.
   useEffect(() => { setView(FIT_VIEW); }, [project.id]);
@@ -810,6 +876,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       onPointerUp={onNavUp}
       onPointerCancel={onNavUp}
     >
+      <canvas ref={sharpRef} className="sharp" aria-hidden="true" style={{ width: stageSize.w, height: stageSize.h }} />
       <div className="canvas-wrap" style={{ width: display.w, height: display.h, transform: viewTransform(view) }}>
         <canvas
           ref={canvasRef}

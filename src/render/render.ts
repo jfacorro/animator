@@ -186,10 +186,10 @@ export function paintStroke(ctx: CanvasRenderingContext2D, s: Stroke, live = fal
   if (s.matrix) ctx.transform(...s.matrix);
   ctx.globalCompositeOperation = s.erase ? 'destination-out' : 'source-over';
   if (!s.erase && s.opacity !== undefined && s.opacity < 1) ctx.globalAlpha *= s.opacity;
-  // Soft edges: blur in screen pixels, scaled by how much the stroke's matrix enlarges it.
+  // Soft edges: blur in canvas pixels, scaled by how much the stroke's matrix (and any zoom) enlarges it.
   if (s.softness && !s.erase && 'filter' in ctx) {
-    const m = s.matrix;
-    const grow = m ? Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) : 1;
+    const t = ctx.getTransform();
+    const grow = Math.sqrt(Math.abs(t.a * t.d - t.b * t.c));
     ctx.filter = `blur(${(s.size * s.softness * 0.3 * grow).toFixed(2)}px)`;
   }
   const color = s.erase ? '#000' : s.color;
@@ -233,6 +233,8 @@ export interface Pic {
   src: HTMLCanvasElement;
   x: number;
   y: number;
+  /** Already in the output canvas's own pixels (a scratch sheet, or a picture drawn for the current view). */
+  sheet?: boolean;
 }
 
 /** The part of the canvas a drawing can touch, in whole px, or null when it paints nothing. */
@@ -506,14 +508,111 @@ export interface ComposeOptions {
   references?: boolean;
   /** Frame the scene through the camera (playback and export). */
   camera?: boolean;
+  /**
+   * Draw for the screen instead of at project size: `matrix` maps project px
+   * to the output canvas's px. Line layers are redrawn from their vectors at
+   * that scale, so they stay sharp at any zoom. The caller clears the canvas.
+   */
+  view?: { matrix: Matrix; width: number; height: number } | null;
+}
+
+type Matrix = [number, number, number, number, number, number];
+const IDENTITY: Matrix = [1, 0, 0, 1, 0, 0];
+/** a·b: apply b first, then a. */
+export function mulMatrix(a: Matrix, b: Matrix): Matrix {
+  return [
+    a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1],
+    a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3],
+    a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5],
+  ];
+}
+
+// Drawings drawn for the current view, in screen pixels. They're only good
+// for one zoom and position, so the whole set is dropped when the view changes.
+const VIEW_BYTES = (IOS ? 48 : 160) * 1024 * 1024;
+const viewPics = new Map<Drawing, Pic | null>();
+let viewKey = '';
+let viewBytes = 0;
+function dropViewPics() {
+  for (const p of viewPics.values()) retire(p);
+  viewPics.clear();
+  viewBytes = 0;
+}
+
+/** A drawing redrawn from its vectors through `m` onto a canvas of ow × oh px. */
+function viewBitmap(d: Drawing, m: Matrix, ow: number, oh: number, w: number, h: number): Pic | null {
+  const sheet = d.paint ? paintSource(d.paint) : null;
+  if (d.paint && !sheet) return null;
+  if (viewPics.has(d)) {
+    const hit = viewPics.get(d)!;
+    viewPics.delete(d);
+    viewPics.set(d, hit);
+    return hit;
+  }
+  let pic: Pic | null = null;
+  const box = drawingBox(d, w, h);
+  if (box) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [px, py] of [[box.x, box.y], [box.x + box.w, box.y], [box.x, box.y + box.h], [box.x + box.w, box.y + box.h]]) {
+      const sx = m[0] * px + m[2] * py + m[4];
+      const sy = m[1] * px + m[3] * py + m[5];
+      x0 = Math.min(x0, sx); y0 = Math.min(y0, sy); x1 = Math.max(x1, sx); y1 = Math.max(y1, sy);
+    }
+    const bx = Math.max(0, Math.floor(x0) - 1);
+    const by = Math.max(0, Math.floor(y0) - 1);
+    const bw = Math.min(ow, Math.ceil(x1) + 1) - bx;
+    const bh = Math.min(oh, Math.ceil(y1) + 1) - by;
+    if (bw > 0 && bh > 0) {
+      const c = bitmapCanvas(round64(bw), round64(bh));
+      const ctx = c.getContext('2d')!;
+      ctx.setTransform(1, 0, 0, 1, -bx, -by);
+      ctx.transform(...m);
+      if (sheet && d.paint) {
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(sheet, d.paint.x, d.paint.y);
+      }
+      // Lines from their vectors. Bucket fills are pixels by nature (the area
+      // the bucket found), so they're drawn at project size and smoothed into
+      // place under the lines, instead of showing their pixel steps.
+      const { fills, lines } = drawingPasses(d.strokes);
+      for (const s of lines) paintStroke(ctx, s);
+      if (fills.length) {
+        const fc = bitmapCanvas(round64(box.w), round64(box.h));
+        const fctx = fc.getContext('2d')!;
+        fctx.translate(-box.x, -box.y);
+        for (const s of fills) paintStroke(fctx, s);
+        ctx.save();
+        ctx.globalCompositeOperation = 'destination-over';
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(fc, box.x, box.y);
+        ctx.restore();
+        retire({ src: fc, x: 0, y: 0 });
+      }
+      pic = { src: c, x: bx, y: by, sheet: true };
+    }
+  }
+  viewPics.set(d, pic);
+  viewBytes += picBytes(pic);
+  while (viewBytes > VIEW_BYTES && viewPics.size > 1) {
+    const [oldest, gone] = viewPics.entries().next().value!;
+    viewBytes -= picBytes(gone);
+    viewPics.delete(oldest);
+    retire(gone);
+  }
+  return pic;
 }
 
 // Scratch canvases for groups and clipping, reused between frames.
-const pool: HTMLCanvasElement[] = [];
+// The screen view keeps its own set, so it and project-size frames don't keep
+// resizing each other's canvases.
+const projectPool: HTMLCanvasElement[] = [];
+const viewPool: HTMLCanvasElement[] = [];
+let pool = projectPool;
 let poolUsed = 0;
 function borrow(w: number, h: number): CanvasRenderingContext2D {
   let c = pool[poolUsed];
   if (!c || c.width !== w || c.height !== h) {
+    if (c) c.width = c.height = 0;
     c = makeCanvas(w, h);
     pool[poolUsed] = c;
   }
@@ -525,23 +624,55 @@ function borrow(w: number, h: number): CanvasRenderingContext2D {
   ctx.clearRect(0, 0, w, h);
   return ctx;
 }
-const giveBack = (n = 1) => { poolUsed -= n; };
 
-/** Paint one frame of the scene, bottom layer first, at project size. */
+/** Paint one frame of the scene, bottom layer first, at project size (or for the screen: see `view`). */
 export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, frame: number, opts: ComposeOptions) {
   const { width: w, height: h } = project;
+  const view = opts.view ?? null;
+  const ow = view ? view.width : w;
+  const oh = view ? view.height : h;
+  const V = view ? view.matrix : IDENTITY;
+  const C = opts.camera && hasCamera(project) ? cameraMatrix(cameraAt(project, frame), w, h) : IDENTITY;
+  // Where project-space pictures go, and where scratch sheets go, on the output
+  // canvas and on scratch sheets. At project size, scratch sheets are in project
+  // space and the camera applies when they reach the output. For the screen,
+  // sheets are in screen pixels and pictures go through camera and view.
+  const VC = mulMatrix(V, C);
+  const outPic = VC;
+  const outSheet = view ? IDENTITY : C;
+  const scratchPic = view ? VC : IDENTITY;
+  if (view) {
+    const key = `${V.map((v) => v.toFixed(4)).join(',')}|${ow}x${oh}`;
+    if (key !== viewKey) { dropViewPics(); viewKey = key; }
+  }
+
   ctx.save();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = 'source-over';
+  ctx.setTransform(...V);
   if (opts.paper) {
     ctx.fillStyle = PAPER;
     ctx.fillRect(0, 0, w, h);
-  } else {
+  } else if (!view) {
     ctx.clearRect(0, 0, w, h);
   }
-  if (opts.camera && hasCamera(project)) ctx.setTransform(...cameraMatrix(cameraAt(project, frame), w, h));
+  pool = view ? viewPool : projectPool;
   poolUsed = 0;
+
+  const scratch = () => {
+    const c = borrow(ow, oh);
+    c.setTransform(...scratchPic);
+    return c;
+  };
+  /** Draw a picture (or scratch sheet) onto the output or a scratch sheet. */
+  const put = (t: CanvasRenderingContext2D, p: Pic) => {
+    const out = t === ctx;
+    t.setTransform(...(p.sheet ? (out ? outSheet : IDENTITY) : (out ? outPic : scratchPic)));
+    t.drawImage(p.src, p.x, p.y);
+  };
+  const sheetOf = (t: CanvasRenderingContext2D): Pic => ({ src: t.canvas, x: 0, y: 0, sheet: true });
+  /** A drawing's picture: redrawn for the screen when it has lines, else the cached one. */
+  const drawingPic = (d: Drawing): Pic | null => (view && d.strokes.length ? viewBitmap(d, VC, ow, oh, w, h) : drawingBitmap(d, w, h));
 
   const shown = (l: Layer) => l.visible || !!opts.includeHidden;
 
@@ -551,23 +682,24 @@ export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, fr
     if (ref) {
       const img = opts.references ? loadedImage(ref.data) : null;
       if (!img) return null;
-      const rctx = borrow(w, h);
+      const rctx = scratch();
       rctx.imageSmoothingQuality = 'high';
       rctx.drawImage(img, ref.x, ref.y, ref.width, ref.height);
-      return { src: rctx.canvas, x: 0, y: 0 }; // given back after the frame
+      return sheetOf(rctx);
     }
     const i = celIndexAt(layer, frame);
     const id = i >= 0 ? layer.cels[i].drawingId : null;
     const d = id ? project.drawings[id] : null;
     if (opts.live && opts.live.layerId === layer.id) {
       // Base drawing plus the stroke in progress, so the eraser previews too.
-      const sctx = borrow(w, h);
-      const base = d ? drawingBitmap(d, w, h) : null;
-      if (base) sctx.drawImage(base.src, base.x, base.y);
+      const sctx = scratch();
+      const base = d ? drawingPic(d) : null;
+      if (base) put(sctx, base);
+      sctx.setTransform(...scratchPic);
       for (const s of opts.live.strokes) paintStroke(sctx, s, true);
-      return { src: sctx.canvas, x: 0, y: 0 }; // given back after the frame
+      return sheetOf(sctx);
     }
-    return d && !isBlank(d) ? drawingBitmap(d, w, h) : null;
+    return d && !isBlank(d) ? drawingPic(d) : null;
   };
 
   const onionSkins = (target: CanvasRenderingContext2D, layer: Layer, locked: boolean) => {
@@ -583,7 +715,7 @@ export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, fr
       target.globalAlpha = (onion.opacity ?? 0.45) * (1 - (step - 1) / (count + 0.5));
       target.globalCompositeOperation = 'source-over';
       const t = tintedBitmap(d, color, w, h);
-      if (t) target.drawImage(t.src, t.x, t.y);
+      if (t) put(target, t);
     };
     for (let k = onion.before; k >= 1; k--) draw(anchor - k, onion.beforeColor ?? ONION_BEFORE, k, onion.before);
     if (i >= 0) for (let k = onion.after; k >= 1; k--) draw(anchor + k, onion.afterColor ?? ONION_AFTER, k, onion.after);
@@ -593,40 +725,44 @@ export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, fr
   /** Draw a base layer with the layers clipped to it. */
   const drawStack = (target: CanvasRenderingContext2D, base: Layer, clipped: Layer[], groupLocked: boolean) => {
     if (!shown(base)) return;
+    // Scratch sheets borrowed in here are done with once the stack is drawn.
+    const mark = poolUsed;
     onionSkins(target, base, base.locked || groupLocked);
     const img = picture(base);
     const clips = clipped.filter(shown);
     for (const c of clips) onionSkins(target, c, c.locked || groupLocked);
-    if (!img) return;
+    if (!img) { poolUsed = mark; return; }
     let out: Pic = img;
     if (clips.length) {
       // The base at full size: the mask clipped layers are cut to.
-      const mctx = borrow(w, h);
-      mctx.drawImage(img.src, img.x, img.y);
-      const bctx = borrow(w, h);
-      bctx.drawImage(mctx.canvas, 0, 0);
+      const mctx = scratch();
+      put(mctx, img);
+      const bctx = scratch();
+      put(bctx, sheetOf(mctx));
       for (const c of clips) {
+        const inner = poolUsed;
         const cimg = picture(c);
         if (!cimg) continue;
         // The clipped layer, cut to where the base has paint, then blended onto it.
-        const tctx = borrow(w, h);
+        const tctx = scratch();
         tctx.globalAlpha = c.opacity;
-        tctx.drawImage(cimg.src, cimg.x, cimg.y);
+        put(tctx, cimg);
         tctx.globalAlpha = 1;
         tctx.globalCompositeOperation = 'destination-in';
-        tctx.drawImage(mctx.canvas, 0, 0);
+        put(tctx, sheetOf(mctx));
         bctx.globalCompositeOperation = compositeOp(c.blend);
-        bctx.drawImage(tctx.canvas, 0, 0);
+        put(bctx, sheetOf(tctx));
         bctx.globalCompositeOperation = 'source-over';
-        giveBack();
+        poolUsed = inner;
       }
-      out = { src: bctx.canvas, x: 0, y: 0 };
+      out = sheetOf(bctx);
     }
     target.globalAlpha = base.opacity;
     target.globalCompositeOperation = compositeOp(base.blend);
-    target.drawImage(out.src, out.x, out.y);
+    put(target, out);
     target.globalAlpha = 1;
     target.globalCompositeOperation = 'source-over';
+    poolUsed = mark;
   };
 
   for (const unit of sceneUnits(project)) {
@@ -637,13 +773,14 @@ export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, fr
     const g = unit.group;
     if (!g.visible && !opts.includeHidden) continue;
     // A group is drawn on its own, then faded and blended as one picture.
-    const gctx = borrow(w, h);
+    const gctx = scratch();
     for (const st of unit.stacks) drawStack(gctx, st.base, st.clipped, g.locked);
     ctx.globalAlpha = g.opacity;
     ctx.globalCompositeOperation = compositeOp(g.blend);
-    ctx.drawImage(gctx.canvas, 0, 0);
+    put(ctx, sheetOf(gctx));
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
+    poolUsed = 0;
   }
   poolUsed = 0;
   ctx.restore();
