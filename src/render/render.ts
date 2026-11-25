@@ -628,11 +628,14 @@ function borrow(w: number, h: number): CanvasRenderingContext2D {
 /** Paint one frame of the scene, bottom layer first, at project size (or for the screen: see `view`). */
 export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, frame: number, opts: ComposeOptions) {
   const { width: w, height: h } = project;
-  const view = opts.view ?? null;
+  const cam = opts.camera && hasCamera(project) ? cameraAt(project, frame) : null;
+  const C = cam ? cameraMatrix(cam, w, h) : IDENTITY;
+  // A camera zoomed in enlarges the scene: redraw lines through it, like a
+  // zoomed view, instead of enlarging their project-size pictures.
+  const view = opts.view ?? (cam && cam.zoom > 1.01 ? { matrix: IDENTITY, width: w, height: h } : null);
   const ow = view ? view.width : w;
   const oh = view ? view.height : h;
   const V = view ? view.matrix : IDENTITY;
-  const C = opts.camera && hasCamera(project) ? cameraMatrix(cameraAt(project, frame), w, h) : IDENTITY;
   // Where project-space pictures go, and where scratch sheets go, on the output
   // canvas and on scratch sheets. At project size, scratch sheets are in project
   // space and the camera applies when they reach the output. For the screen,
@@ -642,7 +645,7 @@ export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, fr
   const outSheet = view ? IDENTITY : C;
   const scratchPic = view ? VC : IDENTITY;
   if (view) {
-    const key = `${V.map((v) => v.toFixed(4)).join(',')}|${ow}x${oh}`;
+    const key = `${VC.map((v) => v.toFixed(4)).join(',')}|${ow}x${oh}`;
     if (key !== viewKey) { dropViewPics(); viewKey = key; }
   }
 
@@ -653,7 +656,7 @@ export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, fr
   if (opts.paper) {
     ctx.fillStyle = PAPER;
     ctx.fillRect(0, 0, w, h);
-  } else if (!view) {
+  } else if (!opts.view) {
     ctx.clearRect(0, 0, w, h);
   }
   pool = view ? viewPool : projectPool;
