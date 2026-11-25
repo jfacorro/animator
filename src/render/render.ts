@@ -124,8 +124,9 @@ let fillSheet: HTMLCanvasElement | null = null;
 export function paintDrawing(ctx: CanvasRenderingContext2D, strokes: Stroke[]) {
   const { fills, lines } = drawingPasses(strokes);
   if (!fills.length) { for (const s of lines) paintStroke(ctx, s); return; }
-  if (!fills.some((s) => s.erase)) {
-    // Nothing to erase from the fills: they can go straight onto the page first.
+  if (!lines.some((s) => s.erase)) {
+    // No eraser at all: the fills can go straight onto the page first. (An eraser
+    // used before a fill still cuts the lines, so it must not touch the page's fills.)
     for (const s of fills) paintStroke(ctx, s);
     for (const s of lines) paintStroke(ctx, s);
     return;
