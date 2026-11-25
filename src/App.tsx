@@ -21,6 +21,7 @@ import { readAudioFile, useAudioPlayback } from './audio';
 import { matchingPreset, PRESETS, validBrush, type BrushPreset } from './model/brushes';
 import { BrushEditor } from './components/BrushEditor';
 import { BrushSample } from './components/BrushSample';
+import { AdjustDialog } from './components/AdjustDialog';
 import { ColourPicker } from './components/ColourPicker';
 import { HARMONIES, remember, type Harmony } from './model/colour';
 import {
@@ -162,6 +163,9 @@ export default function App() {
   });
   useEffect(() => { savePref(BRUSHES_KEY, savedBrushes); }, [savedBrushes]);
   const [brushEditor, setBrushEditor] = useState(false);
+  /** Adjust colours: open, and the change shown on the canvas before it's applied. */
+  const [adjusting, setAdjusting] = useState(false);
+  const [adjustPreview, setAdjustPreview] = useState<P.Project | null>(null);
   const preset = matchingPreset(brush, savedBrushes);
   const usePreset = (p: BrushPreset) => setBrush((b) => ({
     ...b, size: p.size, opacity: p.opacity, smoothing: p.smoothing, stabilizer: p.stabilizer, thinning: p.thinning, softness: p.softness, pressure: p.thinning > 0,
@@ -541,7 +545,7 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
-      if (exporting || shortcutsOpen || brushEditor) return;
+      if (exporting || shortcutsOpen || brushEditor || adjusting) return;
       // Space still plays after clicking a button, slider or checkbox: let go of its focus
       // so the browser doesn't also press or toggle it.
       const textField = t.closest('textarea, select, input:not([type=range]):not([type=checkbox]):not([type=color]):not([type=radio])');
@@ -624,7 +628,7 @@ export default function App() {
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
     };
-  }, [exporting, frame, length, tool, togglePlay, goTo, newDrawing, duplicate, selection, deleteSelection, copyStrokes, pasteStrokes, activeLayerId, activeLayer, apply, project, notify, keymap, shortcutsOpen, brushEditor, paintSel, editPaintArea]);
+  }, [exporting, frame, length, tool, togglePlay, goTo, newDrawing, duplicate, selection, deleteSelection, copyStrokes, pasteStrokes, activeLayerId, activeLayer, apply, project, notify, keymap, shortcutsOpen, brushEditor, adjusting, paintSel, editPaintArea]);
 
   const newProject = () => {
     setMenuOpen(false);
@@ -751,6 +755,7 @@ export default function App() {
               <button onClick={newProject} title="Start a blank animation, replacing the current one">New animation</button>
               <button onClick={() => { setMenuOpen(false); audioInput.current?.click(); }} title="Add a sound (MP3, WAV…) to time the animation to, for example dialogue for lip-sync. It's saved inside the animation.">{project.audio ? 'Replace sound…' : 'Add sound…'}</button>
               <button onClick={() => { setMenuOpen(false); imageInput.current?.click(); }} title="Add a picture to trace over, as a see-through layer. It shows on every frame and is never exported.">Add reference image…</button>
+              <button onClick={() => { setMenuOpen(false); setPlaying(false); setAdjusting(true); }} title="Hue, saturation and brightness, or Recolour one colour, for the current drawing or the whole layer">Adjust colours…</button>
               <button onClick={() => { setMenuOpen(false); setShortcutsOpen(true); }} title="See and change the keyboard shortcuts (?)">Keyboard shortcuts…</button>
               <label className="menu-row" title="For iPad and touch screens. With a pencil, a finger moves and zooms the canvas so a resting hand doesn't draw. Two-finger tap undoes, three-finger tap redoes.">
                 Fingers
@@ -1002,7 +1007,7 @@ export default function App() {
 
 
         <Stage
-          project={project} frame={frame} activeLayerId={activeLayerId} tool={tool} brush={brush} onion={onion$}
+          project={adjustPreview ?? project} frame={frame} activeLayerId={activeLayerId} tool={tool} brush={brush} onion={onion$}
           selection={selection} onSelectionChange={setSelection} paintSelection={paintSel} onPaintSelectionChange={setPaintSel} warp={warp} onCommit={onCommit}
           panKey={spaceHeld} onPanned={() => { spacePanned.current = true; }} playing={playing}
           keymap={keymap} symmetry={aids.symmetry} rulers={aids.rulers} onRulersChange={(rulers) => setAids((a) => ({ ...a, rulers }))}
@@ -1080,6 +1085,12 @@ export default function App() {
             harmonyKind={harmonyKind} onHarmonyChange={setHarmonyKind} onClose={() => setPicker(null)}
           />
         </div>
+      )}
+      {adjusting && (
+        <AdjustDialog
+          project={project} layerId={activeLayerId} frame={frame} selection={selection} color={brush.color}
+          onPreview={setAdjustPreview} onApply={(p) => onCommit(() => p)} onClose={() => { setAdjusting(false); setAdjustPreview(null); }}
+        />
       )}
       {brushEditor && (
         <BrushEditor
