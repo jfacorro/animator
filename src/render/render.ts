@@ -166,12 +166,21 @@ export function paintDrawing(ctx: CanvasRenderingContext2D, strokes: Stroke[]) {
   fctx.clearRect(0, 0, width, height);
   fctx.setTransform(ctx.getTransform());
   for (const s of fills) paintStroke(fctx, s);
-  for (const s of lines) paintStroke(ctx, s);
-  ctx.save();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.globalCompositeOperation = 'destination-over';
-  ctx.drawImage(fillSheet, 0, 0, width, height, 0, 0, width, height);
-  ctx.restore();
+  const sheet = fillSheet;
+  const putFills = () => {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'destination-over';
+    ctx.drawImage(sheet, 0, 0, width, height, 0, 0, width, height);
+    ctx.restore();
+  };
+  // An alpha-locked stroke keeps to the fills too, so they go under the lines before it.
+  const firstLocked = lines.findIndex((s) => s.atop);
+  lines.forEach((s, i) => {
+    if (i === firstLocked) putFills();
+    paintStroke(ctx, s);
+  });
+  if (firstLocked < 0) putFills();
 }
 
 /** Paint one stroke. `live` skips caching for a stroke still being drawn. */

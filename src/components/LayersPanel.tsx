@@ -151,9 +151,9 @@ export function LayersPanel(props: Props) {
             </label>
           )}
           {!group && active && !active.reference && (
-            <label className="row" title={active.paint ? 'Alpha lock: new paint only goes where this layer already has paint, so you can shade and recolour without going over the edges. The eraser still erases.' : 'Alpha lock works on paint layers. On a line layer, use a clipping mask instead.'}>
+            <label className="row" title={active.paint ? 'Alpha lock: new paint only goes where this layer already has paint, so you can shade and recolour without going over the edges. The eraser still erases.' : 'Alpha lock: new lines only show where this drawing already has lines or fills. Lines drawn with it stay clipped to what is under them, so select both when you move them.'}>
               Alpha lock
-              <input type="checkbox" disabled={!active.paint} checked={!!active.paint && !!active.alphaLock} onChange={(e) => props.onUpdate(active.id, { alphaLock: e.target.checked })} />
+              <input type="checkbox" checked={!!active.alphaLock} onChange={(e) => props.onUpdate(active.id, { alphaLock: e.target.checked })} />
             </label>
           )}
         </div>

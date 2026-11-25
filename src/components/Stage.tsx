@@ -155,8 +155,8 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     : layer.locked ? 'This layer is locked' : group?.locked ? 'This layer\'s group is locked'
     : !layer.visible ? 'This layer is hidden' : group && !group.visible ? 'This layer\'s group is hidden' : null;
   const drawing = layer ? drawingAt(project, layer, frame) : null;
-  /** On an alpha-locked paint layer, new paint keeps to what's already there. */
-  const lockStroke = (s: Stroke): Stroke => (layer?.paint && layer.alphaLock && !s.erase ? { ...s, atop: true } : s);
+  /** On an alpha-locked layer, new lines and paint keep to what the drawing already has. */
+  const lockStroke = (s: Stroke): Stroke => (layer?.alphaLock && !s.erase ? { ...s, atop: true } : s);
   const scale = display.w / project.width;
   /** Screen px per project px, including zoom. */
   const vs = scale * view.zoom;
