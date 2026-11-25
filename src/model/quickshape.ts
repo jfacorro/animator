@@ -71,8 +71,16 @@ function fitEllipse(pts: Vec[]): { shape: QuickShape & { kind: 'ellipse' }; erro
 }
 
 /** The clean shape a rough stroke looks like, or null to leave it as drawn. */
-export function recognize(points: readonly (Point | Vec)[]): QuickShape | null {
-  const pts: Vec[] = points.map((p) => [p[0], p[1]]);
+export function recognize(points: readonly (Point | Vec)[], minGap = 3): QuickShape | null {
+  // Holding the pen still adds a cluster of jittery points at the end, and slow
+  // drawing bunches points up: keep only points some distance apart.
+  const pts: Vec[] = [];
+  for (const p of points) {
+    const v: Vec = [p[0], p[1]];
+    if (!pts.length || dist(pts[pts.length - 1], v) >= minGap) pts.push(v);
+  }
+  const lastRaw = points[points.length - 1];
+  if (lastRaw && pts.length > 1 && dist(pts[pts.length - 1], [lastRaw[0], lastRaw[1]]) > 0) pts[pts.length - 1] = [lastRaw[0], lastRaw[1]];
   if (pts.length < 3) return null;
   const length = pathLength(pts);
   if (length < 12) return null;
@@ -82,12 +90,22 @@ export function recognize(points: readonly (Point | Vec)[]): QuickShape | null {
   // A line: nearly as long as the path, and never far off it.
   let dev = 0;
   for (const p of pts) dev = Math.max(dev, segDist(p, a, b));
-  if (span > 0.85 * length && dev < Math.max(3, span * 0.07)) return { kind: 'line', a, b };
+  if (span > 0.85 * length && dev < Math.max(3, span * 0.09)) return { kind: 'line', a, b };
 
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const [x, y] of pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
   const size = Math.hypot(x1 - x0, y1 - y0);
-  const closed = span < size * 0.25;
+  // Closed: the ends meet, or the stroke went (nearly) all the way round, even if it overshot.
+  let turn = 0;
+  for (let i = 2; i < pts.length; i++) {
+    const a1 = Math.atan2(pts[i - 1][1] - pts[i - 2][1], pts[i - 1][0] - pts[i - 2][0]);
+    const a2 = Math.atan2(pts[i][1] - pts[i - 1][1], pts[i][0] - pts[i - 1][0]);
+    let d = a2 - a1;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    turn += d;
+  }
+  const closed = span < size * 0.4 || Math.abs(turn) > Math.PI * 1.6;
   const eps = size * 0.07;
   const corners = simplify(pts, eps);
   const meanDev = (poly: Vec[], close: boolean) => {

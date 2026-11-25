@@ -68,3 +68,30 @@ describe('shapes', () => {
     expect(c).toMatchObject({ rx: 20, ry: 20 });
   });
 });
+
+describe('hand-drawn strokes', () => {
+  const noise = (i: number, a: number) => (Math.sin(i * 2.3) + Math.sin(i * 0.7)) * a;
+  const loop = (over: number): V[] => Array.from({ length: 61 }, (_, i) => {
+    const t = (i / 60) * Math.PI * 2 * (1 + over);
+    return [300 + Math.cos(t) * (100 + noise(i, 3)), 300 + Math.sin(t) * (90 + noise(i + 5, 3))];
+  });
+
+  it('a loop that stops short or overshoots is still an ellipse', () => {
+    for (const over of [-0.15, 0.25]) expect(recognize(loop(over))?.kind).toBe('ellipse');
+  });
+
+  it('jitter from holding the pen still at the end is ignored', () => {
+    const pts: V[] = [];
+    for (let i = 0; i <= 40; i++) pts.push([100 + i * 5, 100 + noise(i, 1)]);
+    for (let i = 0; i < 30; i++) pts.push([300 + noise(i, 0.5), 100 + noise(i + 1, 0.5)]);
+    expect(recognize(pts)?.kind).toBe('line');
+  });
+
+  it('a slightly bowed line is still a line', () => {
+    const pts: V[] = Array.from({ length: 41 }, (_, i) => {
+      const t = i / 40;
+      return [100 + t * 300, 100 + t * 150 + Math.sin(t * Math.PI) * 0.08 * 335];
+    });
+    expect(recognize(pts)?.kind).toBe('line');
+  });
+});

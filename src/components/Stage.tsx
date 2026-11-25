@@ -698,7 +698,8 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     const timer = window.setTimeout(() => {
       const cur = gestureRef.current;
       if (cur !== g || g.quick) return;
-      const shape = recognize(g.stroke.points);
+      // Include the stretch the stabilizer hasn't caught up with yet.
+      const shape = recognize([...g.stroke.points, ...catchUp(g.tip, g.pointer)], 3 / vs);
       if (!shape) return;
       const pts = g.stroke.points;
       const pressure = g.stroke.simulatePressure ? 0.5 : pts.reduce((sum, p) => sum + p[2], 0) / pts.length;
@@ -735,7 +736,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
         const pts = raw.map((pt) => (g.tip = amount ? stabilize(g.tip, pt, amount) : pt));
         g.stroke = { ...g.stroke, points: [...g.stroke.points, ...pts] };
         // Moving on restarts the wait for a hold.
-        if (g.hold && Math.hypot(g.pointer[0] - g.hold.at[0], g.pointer[1] - g.hold.at[1]) * vs > 4) armQuickShape([g.pointer[0], g.pointer[1]]);
+        if (g.hold && Math.hypot(g.pointer[0] - g.hold.at[0], g.pointer[1] - g.hold.at[1]) * vs > 8) armQuickShape([g.pointer[0], g.pointer[1]]);
       }
     } else if (g.type === 'shape') {
       let [ex, ey] = [x, y];
