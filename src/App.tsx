@@ -22,6 +22,7 @@ import { matchingPreset, PRESETS, validBrush, type BrushPreset } from './model/b
 import { BrushEditor } from './components/BrushEditor';
 import { BrushSample } from './components/BrushSample';
 import { AdjustDialog } from './components/AdjustDialog';
+import { ReferenceWindow } from './components/ReferenceWindow';
 import { ColourPicker } from './components/ColourPicker';
 import { HARMONIES, remember, type Harmony } from './model/colour';
 import {
@@ -167,6 +168,8 @@ export default function App() {
   const [adjusting, setAdjusting] = useState(false);
   /** Painting the active layer's mask. */
   const [maskEdit, setMaskEdit] = useState(false);
+  /** The floating reference window. */
+  const [refWindow, setRefWindow] = useState(false);
   useEffect(() => { setMaskEdit(false); }, [activeLayerId]);
   const [adjustPreview, setAdjustPreview] = useState<P.Project | null>(null);
   const preset = matchingPreset(brush, savedBrushes);
@@ -758,6 +761,7 @@ export default function App() {
               <button onClick={newProject} title="Start a blank animation, replacing the current one">New animation</button>
               <button onClick={() => { setMenuOpen(false); audioInput.current?.click(); }} title="Add a sound (MP3, WAV…) to time the animation to, for example dialogue for lip-sync. It's saved inside the animation.">{project.audio ? 'Replace sound…' : 'Add sound…'}</button>
               <button onClick={() => { setMenuOpen(false); imageInput.current?.click(); }} title="Add a picture to trace over, as a see-through layer. It shows on every frame and is never exported.">Add reference image…</button>
+              <button onClick={() => { setMenuOpen(false); setRefWindow((v) => !v); }} title="A small window that floats over the canvas: the whole frame as it will look, or a picture to look at while you draw">{refWindow ? 'Hide reference window' : 'Reference window'}</button>
               <button onClick={() => { setMenuOpen(false); setPlaying(false); setAdjusting(true); }} title="Hue, saturation and brightness, or Recolour one colour, for the current drawing or the whole layer">Adjust colours…</button>
               <button onClick={() => { setMenuOpen(false); setShortcutsOpen(true); }} title="See and change the keyboard shortcuts (?)">Keyboard shortcuts…</button>
               <label className="menu-row" title="For iPad and touch screens. With a pencil, a finger moves and zooms the canvas so a resting hand doesn't draw. Two-finger tap undoes, three-finger tap redoes.">
@@ -1109,6 +1113,7 @@ export default function App() {
           />
         </div>
       )}
+      {refWindow && <ReferenceWindow project={project} frame={frame} onClose={() => setRefWindow(false)} />}
       {adjusting && (
         <AdjustDialog
           project={project} layerId={activeLayerId} frame={frame} selection={selection} color={brush.color}
