@@ -125,8 +125,9 @@ Layers come in two kinds. **Line layers** (the + button) keep every stroke
 editable: select, move and resize lines with the Lasso, and the file stays
 small. **Paint layers** (the brush button) work like a paint app: whatever you
 draw there, brush, shapes, text and fills, becomes pixels, and the eraser
-really removes paint. Paint layers can't be selected with the Lasso or copied
-yet; Duplicate repeats a paint drawing.
+really removes paint. On a paint layer the Lasso selects an area of pixels:
+drag it to move, drag a corner to resize, or Flip, Duplicate or Delete it.
+Paint can't be copied to another frame yet; Duplicate repeats a paint drawing.
 
 **Alpha lock** (in the layer settings) keeps new paint to where the layer
 already has paint, for shading and recolouring without going over the edges.

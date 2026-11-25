@@ -8,7 +8,7 @@ import { readImageFile } from './images';
 import { actionFor, displayKey, keyOf, loadKeymap, type ActionId, type Keymap } from './keys';
 import { useLongPress } from './components/longPress';
 import { ShortcutsDialog } from './components/ShortcutsDialog';
-import { FONTS } from './render/render';
+import { encodePaint, FONTS, movePaintRegion, paintSheet } from './render/render';
 import { Stage, type BrushSettings, type Tool } from './components/Stage';
 import { Timeline, type FrameAction } from './components/Timeline';
 import { commit, initHistory, redo, undo, type History } from './model/history';
@@ -117,6 +117,8 @@ export default function App() {
     ...b, size: p.size, opacity: p.opacity, smoothing: p.smoothing, stabilizer: p.stabilizer, thinning: p.thinning, softness: p.softness, pressure: p.thinning > 0,
   }));
   const [selection, setSelection] = useState<number[] | null>(null);
+  /** Paint layers: the outline of the selected area. */
+  const [paintSel, setPaintSel] = useState<[number, number][] | null>(null);
   /** A group row selected in the Layers panel (its opacity and blend show there). */
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [onion, setOnion] = useState<OnionState>(() => ({ ...DEFAULT_ONION, ...loadPref<Partial<OnionState>>(ONION_KEY, {}, (v) => typeof v === 'object') }));
@@ -362,6 +364,7 @@ export default function App() {
   useEffect(() => {
     setSelection(keepSelection.current);
     keepSelection.current = null;
+    setPaintSel(null);
   }, [activeDrawingId, tool]);
   useEffect(() => { keepSelection.current = null; });
   useEffect(() => {
@@ -381,6 +384,23 @@ export default function App() {
     apply(() => P.transformStrokes(r.project, activeLayerId, frame, r.indices, translate(16, 16)));
     setSelection(r.indices);
   }, [apply, activeLayerId, frame, project, selection]);
+
+  /** Paint layers: move, copy or remove the selected area's pixels in one step. */
+  const editPaintArea = useCallback((m: [number, number, number, number, number, number], opts: { keep?: boolean; remove?: boolean }) => {
+    if (!paintSel || !activeLayer?.paint) return;
+    try {
+      const sheet = paintSheet(activeDrawing?.paint, project.width, project.height);
+      const next = encodePaint(movePaintRegion(sheet, paintSel, m, opts), project.width, project.height);
+      apply((p) => P.setPaint(p, activeLayerId, frame, next));
+      setPaintSel(opts.remove ? null : paintSel.map(([x, y]) => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]));
+    } catch (err) {
+      notifyRef.current((err as Error).message);
+    }
+  }, [paintSel, activeLayer, activeDrawing, project.width, project.height, apply, activeLayerId, frame]);
+  const paintAreaCentre = () => {
+    const xs = (paintSel ?? []).map((p) => p[0]);
+    return (Math.min(...xs) + Math.max(...xs)) / 2;
+  };
 
   const flipSelection = useCallback(() => {
     if (!selection || !activeDrawing) return;
@@ -510,6 +530,8 @@ export default function App() {
       else if (key === 'home') goTo(0);
       else if (key === 'end') goTo(length - 1);
       else if (selection && (key === 'delete' || key === 'backspace')) { e.preventDefault(); deleteSelection(); }
+      else if (paintSel && tool === 'select' && (key === 'delete' || key === 'backspace')) { e.preventDefault(); editPaintArea([1, 0, 0, 1, 0, 0], { remove: true }); }
+      else if (paintSel && key === 'escape') setPaintSel(null);
       else if (tool === 'camera' && (key === 'delete' || key === 'backspace') && keyAt(project, frame)) { e.preventDefault(); apply((p) => removeCameraKey(p, frame)); }
       else if (selection && key === 'escape') setSelection(null);
       else if (action?.startsWith('tool.')) setTool(action.slice(5) as Tool);
@@ -538,7 +560,7 @@ export default function App() {
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
     };
-  }, [exporting, frame, length, tool, togglePlay, goTo, newDrawing, duplicate, selection, deleteSelection, copyStrokes, pasteStrokes, activeLayerId, activeLayer, apply, project, notify, keymap, shortcutsOpen]);
+  }, [exporting, frame, length, tool, togglePlay, goTo, newDrawing, duplicate, selection, deleteSelection, copyStrokes, pasteStrokes, activeLayerId, activeLayer, apply, project, notify, keymap, shortcutsOpen, paintSel, editPaintArea]);
 
   const newProject = () => {
     setMenuOpen(false);
@@ -779,7 +801,17 @@ export default function App() {
         )}
         {tool === 'eyedropper' && <span className="hint">Click the canvas to pick its colour. Alt+click does the same with any drawing tool.</span>}
         {tool === 'select' && activeLayer?.reference && <span className="hint">Reference image: drag it to move it, drag a corner to resize it (Shift lets the proportions change)</span>}
-        {tool === 'select' && !selection && !activeLayer?.reference && <span className="hint">Draw a loop around strokes, or click one, to select them</span>}
+        {tool === 'select' && !selection && !activeLayer?.reference && !activeLayer?.paint && <span className="hint">Draw a loop around strokes, or click one, to select them</span>}
+        {tool === 'select' && activeLayer?.paint && !paintSel && <span className="hint">Draw a loop around the paint you want to move</span>}
+        {tool === 'select' && activeLayer?.paint && paintSel && (
+          <>
+            <span className="hint">Area selected · drag to move · drag a corner to resize (Shift keeps proportions)</span>
+            <button className="btn small" title="Mirror the selected paint left to right" onClick={() => { const cx = paintAreaCentre(); editPaintArea([-1, 0, 0, 1, 2 * cx, 0], {}); }}>Flip</button>
+            <button className="btn small" title="Copy the selected paint, slightly offset" onClick={() => editPaintArea([1, 0, 0, 1, 16, 16], { keep: true })}>Duplicate</button>
+            <button className="btn small" title="Erase the selected paint (Delete)" onClick={() => editPaintArea([1, 0, 0, 1, 0, 0], { remove: true })}>Delete</button>
+            <button className="btn small" title="Clear the selection (Esc)" onClick={() => setPaintSel(null)}>Deselect</button>
+          </>
+        )}
         {tool === 'select' && selection && (
           <>
             <span className="hint">{selection.length} selected · drag to move · drag a corner to resize (Shift keeps proportions)</span>
@@ -864,7 +896,7 @@ export default function App() {
 
         <Stage
           project={project} frame={frame} activeLayerId={activeLayerId} tool={tool} brush={brush} onion={onion$}
-          selection={selection} onSelectionChange={setSelection} onCommit={onCommit}
+          selection={selection} onSelectionChange={setSelection} paintSelection={paintSel} onPaintSelectionChange={setPaintSel} onCommit={onCommit}
           panKey={spaceHeld} onPanned={() => { spacePanned.current = true; }} playing={playing}
           keymap={keymap} symmetry={aids.symmetry} rulers={aids.rulers} onRulersChange={(rulers) => setAids((a) => ({ ...a, rulers }))}
           touchDraws={touchDraws} onUndo={() => setHistory(undo)} onRedo={() => setHistory(redo)}
