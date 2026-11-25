@@ -776,7 +776,7 @@ export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, fr
 
   const onionSkins = (target: CanvasRenderingContext2D, layer: Layer, locked: boolean) => {
     const onion = opts.onion;
-    if (!onion || layer.reference || !(onion.layerId === layer.id || (onion.layerId === null && !locked))) return;
+    if (!onion || layer.reference || layer.everyFrame || !(onion.layerId === layer.id || (onion.layerId === null && !locked))) return;
     const i = celIndexAt(layer, frame);
     // Past the end of the layer, the previous drawings are the last ones.
     const anchor = i >= 0 ? i : layer.cels.length;

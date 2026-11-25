@@ -97,6 +97,8 @@ export interface Layer {
   reference?: RefImage;
   /** A paint layer: what's drawn on it becomes pixels, and the eraser really removes paint. */
   paint?: boolean;
+  /** Foreground or background: the layer's first drawing shows on every frame. */
+  everyFrame?: boolean;
   /** Paint layers: new paint only goes where the layer already has paint (Procreate's alpha lock). */
   alphaLock?: boolean;
 }
@@ -201,6 +203,8 @@ export function sceneLength(project: Project): number {
 
 /** Index of the cel showing at `frame` (0-based), or -1 past the layer's end. */
 export function celIndexAt(layer: Layer, frame: number): number {
+  // A foreground or background layer shows its first drawing throughout.
+  if (layer.everyFrame && layer.cels.length) return 0;
   let start = 0;
   for (let i = 0; i < layer.cels.length; i++) {
     const end = start + layer.cels[i].hold;

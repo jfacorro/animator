@@ -141,6 +141,9 @@ function outlineBox(pts: Vec[]): Box {
   return { x0, y0, x1, y1 };
 }
 
+/** Drawing outside the frame is shown through this, so the frame's edge stays clear. */
+const OUTSIDE_FRAME = 'rgba(42, 44, 49, 0.72)';
+
 export function Stage({ project, frame, activeLayerId, tool, brush, onion, selection, onSelectionChange, paintSelection, onPaintSelectionChange, warp, onCommit, onPickColor, panKey, onPanned, playing, keymap, symmetry, rulers, onRulersChange, touchDraws, onUndo, onRedo }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -301,6 +304,28 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       sctx.fillRect(0, 0, project.width, project.height);
       sctx.restore();
       composeFrame(sctx, shown, frame, { paper: true, onion, live, references: true, view: v });
+      // Outside the frame: drawing still shows, but faded, with a line on the frame's edge.
+      sctx.save();
+      sctx.setTransform(1, 0, 0, 1, 0, 0);
+      const inv = new DOMMatrix(v.matrix).inverse();
+      const corners = [[0, 0], [v.width, 0], [v.width, v.height], [0, v.height]].map(([x, y]) => inv.transformPoint({ x, y }));
+      sctx.setTransform(...v.matrix);
+      sctx.beginPath();
+      // The whole visible area (in project space, since the view may be rotated), minus the frame.
+      corners.forEach((p, i) => (i ? sctx.lineTo(p.x, p.y) : sctx.moveTo(p.x, p.y)));
+      sctx.closePath();
+      sctx.rect(0, 0, project.width, project.height);
+      sctx.fillStyle = OUTSIDE_FRAME;
+      sctx.fill('evenodd');
+      sctx.setTransform(1, 0, 0, 1, 0, 0);
+      const edge = [[0, 0], [project.width, 0], [project.width, project.height], [0, project.height]].map(([x, y]) => new DOMMatrix(v.matrix).transformPoint({ x, y }));
+      sctx.beginPath();
+      edge.forEach((p, i) => (i ? sctx.lineTo(p.x, p.y) : sctx.moveTo(p.x, p.y)));
+      sctx.closePath();
+      sctx.lineWidth = dpr;
+      sctx.strokeStyle = '#00000059';
+      sctx.stroke();
+      sctx.restore();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project, frame, onion, activeLayerId, selection, paintSelection, tool, playing, symmetry, imageTick]);
