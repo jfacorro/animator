@@ -225,7 +225,12 @@ export default function App() {
   const keyHint = (id: ActionId) => (keymap[id] ? ` (${displayKey(keymap[id])})` : '');
 
   const length = P.sceneLength(project);
-  const [panels, setPanels] = useState<Panels>(() => ({ ...DEFAULT_PANELS, ...(smallScreen() ? COMPACT_PANELS : {}), ...loadPref<Partial<Panels>>(PANELS_KEY, {}, (v) => typeof v === 'object') }));
+  const [panels, setPanels] = useState<Panels>(() => {
+    const p: Panels = { ...DEFAULT_PANELS, ...(smallScreen() ? COMPACT_PANELS : {}), ...loadPref<Partial<Panels>>(PANELS_KEY, {}, (v) => typeof v === 'object') };
+    // Sizes saved before the limits changed are brought back inside them.
+    for (const k of Object.keys(PANEL_LIMITS) as (keyof typeof PANEL_LIMITS)[]) p[k] = clampPanel(k, Number(p[k]) || DEFAULT_PANELS[k]);
+    return p;
+  });
   useEffect(() => { savePref(PANELS_KEY, panels); }, [panels]);
   /** Panel size when a resize drag started. */
   const panelStart = useRef<Panels | null>(null);
