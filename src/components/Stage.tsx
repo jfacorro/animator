@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { scaleAbout, spansBox, strokeBounds, strokesInLasso, translate, unionBoxes, apply, type Box, type Matrix, type Vec } from '../model/geometry';
-import { addStroke, celIndexAt, drawingAt, transformStrokes, type FontId, type Point, type Project, type Stroke } from '../model/project';
+import { addStroke, celIndexAt, drawingAt, setPaint, transformStrokes, type FontId, type Paint, type Point, type Project, type Stroke } from '../model/project';
 import { floodFillSpans } from '../render/fill';
 import { catchUp, stabilize } from '../model/brushes';
 import { groupOf } from '../model/groups';
 import { cameraAt, cameraCorners, hasCamera, setCameraKey, type CameraView } from '../model/camera';
-import { composeFrame, fontCss, LINE_HEIGHT, measureText, onImageLoad, paintStroke, type OnionOptions } from '../render/render';
+import { bakePaint, composeFrame, paintReady, fontCss, LINE_HEIGHT, measureText, onImageLoad, paintSource, paintStroke, selectionMask, type OnionOptions } from '../render/render';
 import { placeReference, rulerStep, snapToGuides, symmetricStrokes, type GuideAxis, type Symmetry } from '../model/aids';
 import { addGuide, moveGuide, removeGuide } from '../model/aids';
 import { tapDown, tapMove, tapUp, type Taps } from '../model/taps';
@@ -144,12 +144,22 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   const isRef = !!layer?.reference;
   const blocked = !layer ? 'Pick a layer to draw on'
     : isRef && tool !== 'select' ? 'This is a reference image: pick another layer to draw on. Use the Lasso tool to move or resize it.'
+    : layer.paint && tool === 'select' ? 'The Lasso works on line layers. Paint layers can\'t be selected yet.'
     : layer.locked ? 'This layer is locked' : group?.locked ? 'This layer\'s group is locked'
     : !layer.visible ? 'This layer is hidden' : group && !group.visible ? 'This layer\'s group is hidden' : null;
   const drawing = layer ? drawingAt(project, layer, frame) : null;
   const scale = display.w / project.width;
   /** Screen px per project px, including zoom. */
   const vs = scale * view.zoom;
+  // The selected strokes' silhouette, outlined on the overlay along their real edges.
+  const mask = useMemo(() => {
+    if (tool !== 'select' || !selection || !drawing || layer?.reference) return null;
+    const box = unionBoxes(selection.map((i) => (drawing.strokes[i] && !drawing.strokes[i].erase ? strokeBounds(drawing.strokes[i]) : null)));
+    return box ? selectionMask(drawing.strokes, selection, box) : null;
+  }, [tool, selection, drawing, layer?.reference]);
+
+  // Start decoding paint layers' pixels early, so playback doesn't wait on them.
+  useEffect(() => { void paintReady(project); }, [project.drawings]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const flash = (text: string) => {
     setNote(text);
@@ -449,7 +459,25 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       color: brush.color, size: brush.textSize, erase: false, smoothing: 0, simulatePressure: false, thinning: 0,
       ...(brush.opacity < 1 ? { opacity: brush.opacity } : {}),
     };
-    onCommit((p) => addStroke(p, activeLayerId, frame, stroke));
+    commitStrokes([stroke]);
+  };
+
+  /** Add strokes to the drawing here. On a paint layer they're baked into its pixels straight away. */
+  const commitStrokes = (strokes: Stroke[]) => {
+    if (!layer?.paint) {
+      onCommit((p) => strokes.reduce((q, s) => addStroke(q, activeLayerId, frame, s), p));
+      return;
+    }
+    // Bake once, here: the history update itself may run twice.
+    let baked: Paint | null;
+    try {
+      baked = bakePaint(drawing?.paint, [...(drawing?.strokes ?? []), ...strokes], project.width, project.height);
+    } catch (err) {
+      flash(err instanceof Error ? err.message : 'Could not paint that');
+      paint();
+      return;
+    }
+    onCommit((p) => setPaint(p, activeLayerId, frame, baked));
   };
 
   const fillAt = (x: number, y: number, pointerId?: number) => {
@@ -459,6 +487,9 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     c.width = w;
     c.height = h;
     const ctx = c.getContext('2d', { willReadFrequently: true })!;
+    // On a paint layer the walls are its paint.
+    const sheet = drawing?.paint ? paintSource(drawing.paint) : null;
+    if (sheet && drawing?.paint) ctx.drawImage(sheet, drawing.paint.x, drawing.paint.y);
     for (const s of drawing?.strokes ?? []) if (s.kind !== 'fill') paintStroke(ctx, s);
     const spans = floodFillSpans(ctx.getImageData(0, 0, w, h).data, w, h, x, y);
     if (!spans) {
@@ -476,15 +507,11 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       schedulePaint();
       return;
     }
-    onCommit((p) => addStroke(p, activeLayerId, frame, stroke));
+    commitStrokes([stroke]);
   };
 
   /** Pull a point onto a nearby guide (within 8 screen px). */
   const snap = (pt: Vec): Vec => snapToGuides(pt, project.guides, 8 / vs);
-
-  /** A stroke and its symmetry copies, as one edit. */
-  const addStrokes = (p: Project, stroke: Stroke) =>
-    symmetricStrokes(stroke, symmetry, p.width, p.height).reduce((q, s) => addStroke(q, activeLayerId, frame, s), p);
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
@@ -668,14 +695,13 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
     if (g.type === 'stroke') {
       const tail = catchUp(g.tip, g.pointer);
       const stroke = tail.length ? { ...g.stroke, points: [...g.stroke.points, ...tail] } : g.stroke;
-      onCommit((p) => addStrokes(p, stroke));
+      commitStrokes(symmetricStrokes(stroke, symmetry, project.width, project.height));
     } else if (g.type === 'shape') {
       const [a, b] = g.stroke.points;
-      if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 1) onCommit((p) => addStrokes(p, g.stroke));
+      if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 1) commitStrokes(symmetricStrokes(g.stroke, symmetry, project.width, project.height));
       else paint();
     } else if (g.type === 'gradient') {
-      const stroke = g.stroke;
-      onCommit((p) => addStroke(p, activeLayerId, frame, stroke));
+      commitStrokes([g.stroke]);
     } else if (g.type === 'camera') {
       const v = g.view;
       if (v !== g.base) onCommit((p) => setCameraKey(p, frame, v));
@@ -846,9 +872,25 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
             {g?.type === 'lasso' && (
               <polyline points={g.points.map((p) => p.join(',')).join(' ')} fill="rgba(240,164,58,0.08)" stroke="#f0a43a" strokeWidth={1.5 / vs} strokeDasharray={`${5 / vs} ${4 / vs}`} />
             )}
+            {box && mask && (
+              // The selection's own edges: a rim just outside the selected strokes.
+              <g transform={g && (g.type === 'move' || g.type === 'scale') ? `matrix(${g.matrix.join(' ')})` : undefined}>
+                <filter id="selection-edge" x={mask.x - 8} y={mask.y - 8} width={mask.width + 16} height={mask.height + 16} filterUnits="userSpaceOnUse">
+                  <feMorphology in="SourceAlpha" operator="dilate" radius={3 / vs} result="outer" />
+                  <feMorphology in="SourceAlpha" operator="dilate" radius={2 / vs} result="inner" />
+                  <feFlood floodColor="#fff" />
+                  <feComposite in2="outer" operator="in" result="halo" />
+                  <feFlood floodColor="#f0a43a" />
+                  <feComposite in2="inner" operator="in" result="edge" />
+                  <feMerge><feMergeNode in="halo" /><feMergeNode in="edge" /></feMerge>
+                  <feComposite in2="SourceAlpha" operator="out" />
+                </filter>
+                <image className="selection-edge" href={mask.url} x={mask.x} y={mask.y} width={mask.width} height={mask.height} filter="url(#selection-edge)" />
+              </g>
+            )}
             {box && (
               <g>
-                <rect x={box.x0} y={box.y0} width={box.x1 - box.x0} height={box.y1 - box.y0} fill="none" stroke="#f0a43a" strokeWidth={1.5 / vs} strokeDasharray={`${6 / vs} ${4 / vs}`} />
+                <rect x={box.x0} y={box.y0} width={box.x1 - box.x0} height={box.y1 - box.y0} fill="none" stroke="#f0a43a" strokeWidth={(mask ? 1 : 1.5) / vs} strokeOpacity={mask ? 0.45 : 1} strokeDasharray={`${6 / vs} ${4 / vs}`} />
                 {[[box.x0, box.y0], [box.x1, box.y0], [box.x1, box.y1], [box.x0, box.y1]].map(([cx, cy], i) => (
                   <rect key={i} x={cx - hs / 2} y={cy - hs / 2} width={hs} height={hs} fill="#fff" stroke="#f0a43a" strokeWidth={1.5 / vs} />
                 ))}

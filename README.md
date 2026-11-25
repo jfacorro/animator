@@ -22,7 +22,7 @@ npm run build    # static site in dist/
 ## Online
 
 Every merge to `main` publishes the app to GitHub Pages
-(https://jfacorro.github.io/animator/) through `.github/workflows/pages.yml`.
+(https://juan.facorro.com/animator/) through `.github/workflows/pages.yml`.
 Once opened there, it also opens without a connection, and *Add to Home Screen*
 on an iPhone or iPad gives a full-screen app. Drawings are kept in the browser
 you use them in: to move an animation between devices or browsers, use
@@ -115,6 +115,15 @@ Drag the thin line on the edge of the tools, layers panel or timeline to resize 
 
 On a phone or small window the app starts with the layers panel hidden and a short timeline, and the bars scroll sideways instead of wrapping.
 
+## Paint layers
+
+Layers come in two kinds. **Line layers** (the + button) keep every stroke
+editable: select, move and resize lines with the Lasso, and the file stays
+small. **Paint layers** (the brush button) work like a paint app: whatever you
+draw there, brush, shapes, text and fills, becomes pixels, and the eraser
+really removes paint. Paint layers can't be selected with the Lasso or copied
+yet; Duplicate repeats a paint drawing.
+
 ## iPad and Apple Pencil
 
 Open the app in Safari, then *Share → Add to Home Screen* to run it full screen
@@ -196,7 +205,7 @@ Next, in this order:
 1. ~~More export formats: MP4 video with sound, PNG image sequences~~ (done)
 2. ~~Faster with long animations and many layers~~ (done)
 3. ~~Ready for iPad and Apple Pencil~~ (done)
-4. **Published online, so it works without a local copy** (this version)
-5. Paint layers: pixel layers for painting and real erasing, next to the stroke layers
+4. ~~Published online, so it works without a local copy~~ (done)
+5. **Paint layers: pixel layers for painting and real erasing, next to the line layers** (this version)
 
 Importing photos of paper drawings is parked.

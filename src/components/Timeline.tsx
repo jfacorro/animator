@@ -5,7 +5,7 @@ import { layerDrops, useLayerDrag } from './useLayerDrag';
 import { groupOf } from '../model/groups';
 import { peaks, useAudioBuffer } from '../audio';
 import type { AudioTrack } from '../model/project';
-import { celIndexAt, celStart, dropIndex, dropSlot, layerLength, sceneLength, type Layer, type Project } from '../model/project';
+import { celIndexAt, celStart, isBlank, dropIndex, dropSlot, layerLength, sceneLength, type Layer, type Project } from '../model/project';
 
 const FW = 26; // frame width in px
 
@@ -347,7 +347,7 @@ export function Timeline(props: Props) {
                     const cls = [
                       'cel',
                       !c.drawingId ? 'blank' : '',
-                      d && !d.strokes.length ? 'empty' : '',
+                      d && isBlank(d) ? 'empty' : '',
                       current ? 'current' : '',
                       l.visible ? '' : 'dimmed',
                       dragging?.from === i ? 'lifted' : '',
@@ -385,14 +385,14 @@ export function Timeline(props: Props) {
             </>
           ) : (
             <>
-              <button role="menuitem" disabled={!menuDrawing?.strokes.length} title="Copy this drawing to paste it on another frame or layer (Ctrl+C)" onClick={() => act('copy')}>Copy drawing</button>
+              <button role="menuitem" disabled={!menuDrawing?.strokes.length || !!menuDrawing?.paint} title="Copy this drawing to paste it on another frame or layer (Ctrl+C)" onClick={() => act('copy')}>Copy drawing</button>
               <button role="menuitem" disabled={menuLayer.locked || !props.canPaste} title="Paste what you copied on top of this drawing (Ctrl+V)" onClick={() => act('paste')}>Paste into drawing</button>
               <div className="frame-menu-sep" />
               <button role="menuitem" disabled={menuLayer.locked} onClick={() => act('insert-left')}>Insert drawing to the left</button>
               <button role="menuitem" disabled={menuLayer.locked} onClick={() => act('insert-right')}>Insert drawing to the right</button>
               <button role="menuitem" disabled={menuLayer.locked} onClick={() => act('duplicate')}>Duplicate</button>
               <div className="frame-menu-sep" />
-              <button role="menuitem" disabled={menuLayer.locked || !menuDrawing?.strokes.length} onClick={() => act('clear')}>Clear drawing</button>
+              <button role="menuitem" disabled={menuLayer.locked || isBlank(menuDrawing)} onClick={() => act('clear')}>Clear drawing</button>
               <button role="menuitem" className="danger" disabled={menuLayer.locked} onClick={() => act('delete')}>Delete drawing</button>
             </>
           )}

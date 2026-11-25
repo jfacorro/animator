@@ -56,7 +56,21 @@ export interface Gradient {
 export interface Drawing {
   id: string;
   strokes: Stroke[];
+  /** On a paint layer: the drawing's pixels. Strokes made there are baked into it. */
+  paint?: Paint;
 }
+
+/** Pixels, as a PNG data URL, covering only the part of the canvas that has paint. */
+export interface Paint {
+  data: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Nothing drawn: no strokes and no paint. */
+export const isBlank = (d: Drawing | null | undefined) => !d || (!d.strokes.length && !d.paint);
 
 export interface Cel {
   /** `null` is a blank cel: the layer shows nothing for these frames. */
@@ -79,6 +93,8 @@ export interface Layer {
   groupId?: string;
   /** A reference image to trace over: shown on every frame, never drawn on or exported. */
   reference?: RefImage;
+  /** A paint layer: what's drawn on it becomes pixels, and the eraser really removes paint. */
+  paint?: boolean;
 }
 
 export type BlendMode =
@@ -251,6 +267,14 @@ export function addStroke(project: Project, layerId: string, frame: number, stro
   return { ...p, drawings: { ...p.drawings, [drawing.id]: { ...drawing, strokes } } };
 }
 
+/** Replace the pixels of the paint drawing at `frame` (making one on a blank frame). Its strokes are baked in, so they go. */
+export function setPaint(project: Project, layerId: string, frame: number, paint: Paint | null): Project {
+  const ensured = ensureDrawingAt(project, layerId, frame);
+  const p = ensured.project;
+  const id = ensured.drawingId;
+  return { ...p, drawings: { ...p.drawings, [id]: paint ? { id, strokes: [], paint } : { id, strokes: [] } } };
+}
+
 function editStrokes(project: Project, layerId: string, frame: number, fn: (strokes: Stroke[]) => Stroke[]): Project {
   const layer = findLayer(project, layerId);
   const d = drawingAt(project, layer, frame);
@@ -331,8 +355,8 @@ export function clearCelAt(project: Project, layerId: string, frame: number): Pr
   const layer = findLayer(project, layerId);
   const i = celIndexAt(layer, frame);
   const id = i >= 0 ? layer.cels[i].drawingId : null;
-  if (!id || !project.drawings[id]?.strokes.length) return project;
-  return { ...project, drawings: { ...project.drawings, [id]: { ...project.drawings[id], strokes: [] } } };
+  if (!id || isBlank(project.drawings[id])) return project;
+  return { ...project, drawings: { ...project.drawings, [id]: { id, strokes: [] } } };
 }
 
 /**
@@ -379,7 +403,8 @@ export function duplicateCelAt(project: Project, layerId: string, frame: number)
   const drawings = { ...project.drawings };
   let drawingId: string | null = null;
   if (src.drawingId) {
-    const copy: Drawing = { id: newId('d'), strokes: [...(project.drawings[src.drawingId]?.strokes ?? [])] };
+    const from = project.drawings[src.drawingId];
+    const copy: Drawing = { id: newId('d'), strokes: [...(from?.strokes ?? [])], ...(from?.paint ? { paint: from.paint } : {}) };
     drawings[copy.id] = copy;
     drawingId = copy.id;
   }
@@ -423,9 +448,10 @@ export function holdToEnd(project: Project, layerId: string, frame: number): Pro
   return mapLayer(project, layerId, (l) => ({ ...l, cels: l.cels.map((c, j) => (j === i ? { ...c, hold } : c)) }));
 }
 
-export function addLayer(project: Project, name: string, aboveLayerId?: string): { project: Project; layerId: string } {
+export function addLayer(project: Project, name: string, aboveLayerId?: string, opts: { paint?: boolean } = {}): { project: Project; layerId: string } {
   const drawings = { ...project.drawings };
-  const layer = createLayer(name, drawings);
+  const plain = createLayer(name, drawings);
+  const layer = opts.paint ? { ...plain, paint: true } : plain;
   const layers = [...project.layers];
   const at = aboveLayerId ? layers.findIndex((l) => l.id === aboveLayerId) + 1 : layers.length;
   // A layer added above one in a group joins that group.

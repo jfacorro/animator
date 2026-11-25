@@ -401,6 +401,7 @@ export default function App() {
   const copyStrokes = useCallback((layerId: string, f: number, indices: number[] | null) => {
     const layer = project.layers.find((l) => l.id === layerId);
     const d = layer ? P.drawingAt(project, layer, f) : null;
+    if (d?.paint) { notify('Paint drawings can\'t be copied yet. Use Duplicate to repeat one.'); return false; }
     const strokes = d ? (indices ? indices.map((i) => d.strokes[i]).filter(Boolean) : d.strokes) : [];
     if (!strokes.length) { notify('Nothing to copy here'); return false; }
     setClipboard(strokes);
@@ -882,6 +883,11 @@ export default function App() {
           onSelect={setActiveLayerId}
           onAdd={() => {
             const r = P.addLayer(project, `Layer ${project.layers.length + 1}`, activeLayerId);
+            apply(() => r.project);
+            setActiveLayerId(r.layerId);
+          }}
+          onAddPaint={() => {
+            const r = P.addLayer(project, `Paint ${project.layers.filter((l) => l.paint).length + 1}`, activeLayerId, { paint: true });
             apply(() => r.project);
             setActiveLayerId(r.layerId);
           }}
