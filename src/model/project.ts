@@ -1,6 +1,6 @@
 // The project data model and pure operations on it.
 import { multiply, type Matrix } from './geometry';
-import type { Guides, RefImage } from './aids';
+import type { Guides, Perspective, RefImage } from './aids';
 //
 // A project is a stack of layers. Each layer holds an ordered list of cels
 // (an "exposure sheet"): every cel shows one drawing for `hold` frames, so a
@@ -170,6 +170,8 @@ export interface Project {
   groups?: Record<string, LayerGroup>;
   /** Guide lines to line drawings up with. */
   guides?: Guides;
+  /** Perspective guide: lines drawn with the line tool follow its vanishing points. */
+  perspective?: Perspective;
 }
 
 export const MAX_HOLD = 24;

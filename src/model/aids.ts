@@ -118,3 +118,47 @@ export function placeReference(project: Project, layerId: string, rect: Omit<Ref
 
 /** Reference layers never hold drawings: true if an edit gave one some. */
 export const referenceGotDrawings = (p: Project) => p.layers.some((l) => l.reference && l.cels.length > 0);
+
+/** Perspective guide: one or two vanishing points, in project px. */
+export interface Perspective {
+  on: boolean;
+  points: Vec[];
+}
+
+/** Where vanishing points start: on a horizon a bit above the middle. */
+export function defaultPerspective(count: 1 | 2, w: number, h: number): Perspective {
+  const y = h * 0.42;
+  return { on: true, points: count === 1 ? [[w / 2, y]] : [[w * 0.08, y], [w * 0.92, y]] };
+}
+
+/**
+ * The directions a straight line can take from `start` in perspective: towards
+ * each vanishing point, upright, and (with one point) level.
+ */
+export function perspectiveDirections(start: Vec, p: Perspective): Vec[] {
+  const dirs: Vec[] = [[0, 1]];
+  if (p.points.length < 2) dirs.push([1, 0]);
+  for (const [vx, vy] of p.points) {
+    const dx = vx - start[0], dy = vy - start[1], d = Math.hypot(dx, dy);
+    if (d > 1e-6) dirs.push([dx / d, dy / d]);
+  }
+  return dirs;
+}
+
+/** A line's end snapped onto the perspective direction closest to where it was dragged. */
+export function snapPerspective(start: Vec, end: Vec, p: Perspective): Vec {
+  const dx = end[0] - start[0], dy = end[1] - start[1];
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) return end;
+  let best: Vec = end, bestCos = -1;
+  for (const [ux, uy] of perspectiveDirections(start, p)) {
+    // Along the direction or against it, whichever the drag is closer to.
+    const along = dx * ux + dy * uy;
+    const cos = Math.abs(along) / len;
+    if (cos > bestCos) {
+      bestCos = cos;
+      best = [start[0] + ux * along, start[1] + uy * along];
+    }
+  }
+  return best;
+}
