@@ -63,7 +63,7 @@ export function samplePoints(s: Stroke): Vec[] {
     const [a, b] = s.points;
     if (!a || !b) return [];
     local = [[a[0], a[1]], [b[0], a[1]], [b[0], b[1]], [a[0], b[1]], [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]];
-  } else if (kind === 'free') {
+  } else if (kind === 'free' || (kind === 'line' && s.points.length > 2)) {
     const step = Math.max(1, Math.floor(s.points.length / 48));
     local = s.points.filter((_, i) => i % step === 0).map((p) => [p[0], p[1]] as Vec);
   } else {

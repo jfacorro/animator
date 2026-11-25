@@ -35,6 +35,7 @@ const TOOLS: { id: Tool; name: string; key: string; help: string; Icon: () => Re
   { id: 'text', name: 'Text', key: 't', help: 'click the canvas and type. Enter finishes, Shift+Enter starts a new line', Icon: I.Text },
   { id: 'eyedropper', name: 'Eyedropper', key: 'i', help: 'pick a colour from the canvas', Icon: I.Dropper },
   { id: 'select', name: 'Lasso select', key: 's', help: 'select strokes to move, resize, flip or delete', Icon: I.Lasso },
+  { id: 'liquify', name: 'Liquify', key: 'w', help: 'push lines or paint around, like a finger in wet paint, to nudge a pose or squash and stretch', Icon: I.Liquify },
   { id: 'camera', name: 'Camera', key: 'k', help: 'frame the shot: pan, zoom and rotate the camera, keyed over time', Icon: I.Camera },
 ];
 const COLOUR_TOOLS: Tool[] = ['brush', 'line', 'rect', 'ellipse', 'fill', 'text', 'eyedropper'];
@@ -72,7 +73,7 @@ const MAX_PALETTE = 24;
 
 const INK = PRESETS.find((p) => p.id === 'ink')!;
 const DEFAULT_BRUSH: BrushSettings = {
-  color: '#1a1a1a', eraserSize: 24, pressure: true, fillShapes: false,
+  color: '#1a1a1a', eraserSize: 24, liquifySize: 80, pressure: true, fillShapes: false,
   fillMode: 'solid', color2: '#ffffff', fadeOut: true, font: 'sans', textSize: 48, bold: false,
   size: INK.size, opacity: INK.opacity, smoothing: INK.smoothing, stabilizer: INK.stabilizer, thinning: INK.thinning, softness: INK.softness,
 };
@@ -119,6 +120,10 @@ export default function App() {
   const [selection, setSelection] = useState<number[] | null>(null);
   /** Paint layers: the outline of the selected area. */
   const [paintSel, setPaintSel] = useState<[number, number][] | null>(null);
+  /** Lasso: bend the selection with a grid of handles instead of moving it. */
+  const [warp, setWarp] = useState(false);
+  const hasSelection = !!selection || !!paintSel;
+  useEffect(() => { if (!hasSelection) setWarp(false); }, [hasSelection]);
   /** A group row selected in the Layers panel (its opacity and blend show there). */
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [onion, setOnion] = useState<OnionState>(() => ({ ...DEFAULT_ONION, ...loadPref<Partial<OnionState>>(ONION_KEY, {}, (v) => typeof v === 'object') }));
@@ -627,6 +632,7 @@ export default function App() {
 
   const isEraser = tool === 'eraser';
   const size = isEraser ? brush.eraserSize : brush.size;
+  const liquifySize = brush.liquifySize ?? 80;
 
   return (
     <div className="app">
@@ -728,6 +734,15 @@ export default function App() {
             <span className="value">{size} px</span>
           </label>
         )}
+        {tool === 'liquify' && (
+          <>
+            <label title="How wide an area moves with the pointer">Size
+              <input type="range" min={10} max={400} value={liquifySize} onChange={(e) => setBrush((b) => ({ ...b, liquifySize: Number(e.target.value) }))} />
+              <span className="value">{liquifySize} px</span>
+            </label>
+            <span className="hint">{activeLayer?.paint ? 'Drag to push the paint around' : 'Drag to push lines around: bend a pose, squash and stretch'}</span>
+          </>
+        )}
         {tool === 'brush' && (
           <>
             <label title="Evens out shaky lines. Higher values give smoother curves but follow the pen less closely.">Smoothing
@@ -806,6 +821,7 @@ export default function App() {
         {tool === 'select' && activeLayer?.paint && paintSel && (
           <>
             <span className="hint">Area selected · drag to move · drag a corner to resize (Shift keeps proportions)</span>
+            <button className={`btn small${warp ? ' on' : ''}`} aria-pressed={warp} title="Warp: bend the selection by dragging the handles of a grid over it" onClick={() => setWarp((w) => !w)}>Warp</button>
             <button className="btn small" title="Mirror the selected paint left to right" onClick={() => { const cx = paintAreaCentre(); editPaintArea([-1, 0, 0, 1, 2 * cx, 0], {}); }}>Flip</button>
             <button className="btn small" title="Copy the selected paint, slightly offset" onClick={() => editPaintArea([1, 0, 0, 1, 16, 16], { keep: true })}>Duplicate</button>
             <button className="btn small" title="Erase the selected paint (Delete)" onClick={() => editPaintArea([1, 0, 0, 1, 0, 0], { remove: true })}>Delete</button>
@@ -815,6 +831,7 @@ export default function App() {
         {tool === 'select' && selection && (
           <>
             <span className="hint">{selection.length} selected · drag to move · drag a corner to resize (Shift keeps proportions)</span>
+            <button className={`btn small${warp ? ' on' : ''}`} aria-pressed={warp} title="Warp: bend the selection by dragging the handles of a grid over it" onClick={() => setWarp((w) => !w)}>Warp</button>
             <button className="btn small" title="Mirror the selection left to right" onClick={flipSelection}>Flip</button>
             <button className="btn small" title="Copy the selection, slightly offset" onClick={duplicateSelection}>Duplicate</button>
             <button className="btn small" title="Copy the selection to paste it into another frame or layer (Ctrl+C, then Ctrl+V)" onClick={() => copyStrokes(activeLayerId, frame, selection)}>Copy</button>
@@ -896,7 +913,7 @@ export default function App() {
 
         <Stage
           project={project} frame={frame} activeLayerId={activeLayerId} tool={tool} brush={brush} onion={onion$}
-          selection={selection} onSelectionChange={setSelection} paintSelection={paintSel} onPaintSelectionChange={setPaintSel} onCommit={onCommit}
+          selection={selection} onSelectionChange={setSelection} paintSelection={paintSel} onPaintSelectionChange={setPaintSel} warp={warp} onCommit={onCommit}
           panKey={spaceHeld} onPanned={() => { spacePanned.current = true; }} playing={playing}
           keymap={keymap} symmetry={aids.symmetry} rulers={aids.rulers} onRulersChange={(rulers) => setAids((a) => ({ ...a, rulers }))}
           touchDraws={touchDraws} onUndo={() => setHistory(undo)} onRedo={() => setHistory(redo)}

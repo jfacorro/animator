@@ -1,25 +1,28 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { scaleAbout, spansBox, strokeBounds, strokesInLasso, translate, unionBoxes, apply, type Box, type Matrix, type Vec } from '../model/geometry';
-import { addStroke, celIndexAt, drawingAt, setPaint, transformStrokes, type FontId, type Paint, type Point, type Project, type Stroke } from '../model/project';
+import { addStroke, celIndexAt, drawingAt, replaceStrokes, setPaint, transformStrokes, type FontId, type Paint, type Point, type Project, type Stroke } from '../model/project';
 import { floodFillSpans } from '../render/fill';
 import { catchUp, stabilize } from '../model/brushes';
 import { groupOf } from '../model/groups';
 import { cameraAt, cameraCorners, hasCamera, setCameraKey, type CameraView } from '../model/camera';
-import { bakePaint, composeFrame, encodePaint, livePaint, movePaintRegion, mulMatrix, paintSheet, PAPER, paintReady, fontCss, LINE_HEIGHT, measureText, onImageLoad, paintSource, paintStroke, selectionMask, type OnionOptions } from '../render/render';
+import { bakePaint, composeFrame, encodePaint, livePaint, movePaintRegion, mulMatrix, paintSheet, PAPER, pushPixels, warpPaintRegion, paintReady, fontCss, LINE_HEIGHT, measureText, onImageLoad, paintSource, paintStroke, selectionMask, type OnionOptions } from '../render/render';
 import { placeReference, rulerStep, snapToGuides, symmetricStrokes, type GuideAxis, type Symmetry } from '../model/aids';
 import { addGuide, moveGuide, removeGuide } from '../model/aids';
 import { tapDown, tapMove, tapUp, type Taps } from '../model/taps';
+import { pushStrokes, startGrid, warpPoint, warpStrokes, type Grid } from '../model/warp';
 import { adjustShape, HOLD_MS, recognize, SHAPE_NAMES, shapePoints, type QuickShape } from '../model/quickshape';
 import { FIT_VIEW, flipAt, pinch, rotateAt, screenToLocal, snapRotation, viewTransform, zoomAt, type View } from '../model/view';
 import * as I from './Icons';
 import { actionFor, displayKey, keyOf, type Keymap } from '../keys';
 
-export type Tool = 'brush' | 'eraser' | 'line' | 'rect' | 'ellipse' | 'fill' | 'text' | 'eyedropper' | 'select' | 'camera';
+export type Tool = 'brush' | 'eraser' | 'line' | 'rect' | 'ellipse' | 'fill' | 'text' | 'eyedropper' | 'select' | 'liquify' | 'camera';
 
 export interface BrushSettings {
   color: string;
   size: number;
   eraserSize: number;
+  /** Liquify: how wide an area moves with the pointer. */
+  liquifySize?: number;
   smoothing: number;
   pressure: boolean;
   /** 0–1: see-through to solid. Also used by shapes and fills. */
@@ -56,6 +59,8 @@ interface Props {
   /** Paint layers: the selected area's outline. */
   paintSelection: Vec[] | null;
   onPaintSelectionChange: (outline: Vec[] | null) => void;
+  /** Lasso: bend the selection with a 3×3 grid of handles instead of moving it. */
+  warp: boolean;
   /** Apply an edit to the project as one undo step. */
   onCommit: (edit: (p: Project) => Project) => void;
   onPickColor: (color: string) => void;
@@ -99,6 +104,8 @@ type Gesture =
   | { type: 'gradient'; pointerId: number; stroke: Stroke; start: Vec; moved: boolean }
   | { type: 'lasso'; pointerId: number; points: Vec[] }
   | { type: 'move'; pointerId: number; start: Vec; matrix: Matrix }
+  | { type: 'liquify'; pointerId: number; last: Vec; strokes?: Stroke[]; sheet?: HTMLCanvasElement; changed: boolean }
+  | { type: 'warp'; pointerId: number; handle: number; grid: Grid }
   | { type: 'scale'; pointerId: number; origin: Vec; corner: Vec; matrix: Matrix }
   | { type: 'camera'; pointerId: number; mode: 'move' | 'zoom'; start: Vec; base: CameraView; view: CameraView };
 
@@ -125,7 +132,7 @@ function movedRect(r: { x: number; y: number; width: number; height: number }, m
   const b = apply(m, r.x + r.width, r.y + r.height);
   return { x: Math.min(a[0], b[0]), y: Math.min(a[1], b[1]), width: Math.abs(b[0] - a[0]), height: Math.abs(b[1] - a[1]) };
 }
-const EDITS: Tool[] = ['brush', 'eraser', 'line', 'rect', 'ellipse', 'fill', 'text', 'select'];
+const EDITS: Tool[] = ['brush', 'eraser', 'line', 'rect', 'ellipse', 'fill', 'text', 'select', 'liquify'];
 
 /** The box around an outline. */
 function outlineBox(pts: Vec[]): Box {
@@ -134,7 +141,7 @@ function outlineBox(pts: Vec[]): Box {
   return { x0, y0, x1, y1 };
 }
 
-export function Stage({ project, frame, activeLayerId, tool, brush, onion, selection, onSelectionChange, paintSelection, onPaintSelectionChange, onCommit, onPickColor, panKey, onPanned, playing, keymap, symmetry, rulers, onRulersChange, touchDraws, onUndo, onRedo }: Props) {
+export function Stage({ project, frame, activeLayerId, tool, brush, onion, selection, onSelectionChange, paintSelection, onPaintSelectionChange, warp, onCommit, onPickColor, panKey, onPanned, playing, keymap, symmetry, rulers, onRulersChange, touchDraws, onUndo, onRedo }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gestureRef = useRef<Gesture | null>(null);
@@ -169,6 +176,20 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   // Paint layers: the selection is an area of pixels. While it's dragged, its pixels are on this sheet.
   const paintSel = layer?.paint && tool === 'select' ? paintSelection : null;
   const paintSheetRef = useRef<HTMLCanvasElement | null>(null);
+  /** The warp grid's box: the selection's, grown so a flat line still gets three rows of handles. */
+  const warpBox = (b: Box): Box => {
+    const min = 60 / vs;
+    const gx = Math.max(0, min - (b.x1 - b.x0)) / 2, gy = Math.max(0, min - (b.y1 - b.y0)) / 2;
+    return { x0: b.x0 - gx, y0: b.y0 - gy, x1: b.x1 + gx, y1: b.y1 + gy };
+  };
+  /** The drawing with the selection bent through a warp grid, for showing or keeping. */
+  const warped = (grid: Grid): Project | null => {
+    if (paintSel && paintSheetRef.current) {
+      return setPaint(project, activeLayerId, frame, livePaint(warpPaintRegion(paintSheetRef.current, paintSel, grid.box, (x, y) => warpPoint(grid, x, y))));
+    }
+    if (selection && drawing) return replaceStrokes(project, activeLayerId, frame, warpStrokes(drawing.strokes, selection, grid));
+    return null;
+  };
   /** On an alpha-locked layer, new lines and paint keep to what the drawing already has. */
   const lockStroke = (s: Stroke): Stroke => (layer?.alphaLock && !s.erase ? { ...s, atop: true } : s);
   const scale = display.w / project.width;
@@ -256,6 +277,10 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       else if (paintSel && paintSheetRef.current) shown = setPaint(project, activeLayerId, frame, livePaint(movePaintRegion(paintSheetRef.current, paintSel, g.matrix)));
       else if (selection) shown = transformStrokes(project, activeLayerId, frame, selection, g.matrix);
     }
+    if (g?.type === 'liquify' && g.changed) {
+      shown = g.sheet ? setPaint(project, activeLayerId, frame, livePaint(g.sheet)) : replaceStrokes(project, activeLayerId, frame, g.strokes!);
+    }
+    if (g?.type === 'warp') shown = warped(g.grid) ?? shown;
     const live = g && (g.type === 'stroke' || g.type === 'shape' || g.type === 'gradient')
       ? { layerId: activeLayerId, strokes: symmetricStrokes(g.stroke, symmetry, project.width, project.height).map(lockStroke) } : null;
     composeFrame(ctx, shown, frame, { paper: true, onion, live, camera: playing, references: !playing });
@@ -278,7 +303,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       composeFrame(sctx, shown, frame, { paper: true, onion, live, references: true, view: v });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project, frame, onion, activeLayerId, selection, playing, symmetry, imageTick]);
+  }, [project, frame, onion, activeLayerId, selection, paintSelection, tool, playing, symmetry, imageTick]);
 
   // Repaint when a reference image finishes loading.
   useEffect(() => onImageLoad(() => setImageTick((t) => t + 1)), []);
@@ -646,8 +671,39 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       return;
     }
 
+    if (tool === 'liquify') {
+      let sheet: HTMLCanvasElement | undefined;
+      if (layer?.paint) {
+        try { sheet = paintSheet(drawing?.paint, project.width, project.height); }
+        catch (err) { flash((err as Error).message); return; }
+      } else if (!drawing?.strokes.length) {
+        flash('Nothing here to liquify yet');
+        return;
+      }
+      gestureRef.current = { type: 'liquify', pointerId: id, last: [x, y], strokes: sheet ? undefined : drawing!.strokes, sheet, changed: false };
+      return;
+    }
+
     if (tool === 'select') {
       const box = selectionBox();
+      if (box && warp && !isRef) {
+        const grid = startGrid(warpBox(box));
+        const r = 12 / vs;
+        // The nearest handle in reach.
+        let handle = -1, best = Infinity;
+        grid.pts.forEach(([hx, hy], i) => {
+          const d = Math.hypot(hx - x, hy - y);
+          if (d <= r * 1.4 && d < best) { best = d; handle = i; }
+        });
+        if (handle >= 0) {
+          if (paintSel) {
+            try { paintSheetRef.current = paintSheet(drawing?.paint, project.width, project.height); }
+            catch (err) { flash((err as Error).message); return; }
+          }
+          gestureRef.current = { type: 'warp', pointerId: id, handle, grid };
+          return;
+        }
+      }
       if (box) {
         const r = 12 / vs;
         const corners: Vec[] = [[box.x0, box.y0], [box.x1, box.y0], [box.x1, box.y1], [box.x0, box.y1]];
@@ -807,6 +863,21 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
         const d1 = Math.hypot(x - b.x, y - b.y) || 1;
         g.view = { ...b, zoom: Math.min(20, Math.max(0.1, (b.zoom * d0) / d1)) };
       }
+    } else if (g.type === 'liquify') {
+      const delta: Vec = [x - g.last[0], y - g.last[1]];
+      if (Math.hypot(delta[0], delta[1]) > 0.3) {
+        const radius = (brush.liquifySize ?? 80) / 2;
+        if (g.sheet) {
+          pushPixels(g.sheet, g.last, delta, radius);
+          g.changed = true;
+        } else {
+          const out = pushStrokes(g.strokes!, g.last, delta, radius);
+          if (out) { g.strokes = out; g.changed = true; }
+        }
+        g.last = [x, y];
+      }
+    } else if (g.type === 'warp') {
+      g.grid = { ...g.grid, pts: g.grid.pts.map((p, i) => (i === g.handle ? [x, y] : p)) };
     } else if (g.type === 'lasso') {
       g.points.push([x, y]);
     } else if (g.type === 'move') {
@@ -846,6 +917,28 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       const v = g.view;
       if (v !== g.base) onCommit((p) => setCameraKey(p, frame, v));
       else paint();
+      setOverlayTick((t) => t + 1);
+    } else if (g.type === 'liquify') {
+      if (!g.changed) paint();
+      else if (g.sheet) {
+        const next = encodePaint(g.sheet, project.width, project.height);
+        onCommit((p) => setPaint(p, activeLayerId, frame, next));
+      } else {
+        const strokes = g.strokes!;
+        onCommit((p) => replaceStrokes(p, activeLayerId, frame, strokes));
+      }
+    } else if (g.type === 'warp') {
+      const grid = g.grid;
+      const sheet = paintSheetRef.current;
+      paintSheetRef.current = null;
+      if (paintSel && sheet) {
+        const next = encodePaint(warpPaintRegion(sheet, paintSel, grid.box, (x, y) => warpPoint(grid, x, y)), project.width, project.height);
+        onCommit((p) => setPaint(p, activeLayerId, frame, next));
+        onPaintSelectionChange(paintSel.map(([px, py]) => warpPoint(grid, px, py)));
+      } else if (selection && drawing) {
+        const strokes = warpStrokes(drawing.strokes, selection, grid);
+        onCommit((p) => replaceStrokes(p, activeLayerId, frame, strokes));
+      } else paint();
       setOverlayTick((t) => t + 1);
     } else if (g.type === 'lasso' && layer?.paint) {
       // An area of pixels: the loop itself, if it encloses anything.
@@ -948,8 +1041,8 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   const camView = g?.type === 'camera' ? g.view : !playing && (tool === 'camera' || hasCamera(project)) ? cameraAt(project, frame) : null;
   const camCorners = camView ? cameraCorners(camView, project.width, project.height) : null;
   const camActive = tool === 'camera';
-  const showBrushCursor = (tool === 'brush' || tool === 'eraser') && cursor && !blocked && !panKey && !navigating;
-  const cursorSize = (tool === 'eraser' ? brush.eraserSize : brush.size) * scale;
+  const showBrushCursor = (tool === 'brush' || tool === 'eraser' || tool === 'liquify') && cursor && !blocked && !panKey && !navigating;
+  const cursorSize = (tool === 'eraser' ? brush.eraserSize : tool === 'liquify' ? brush.liquifySize ?? 80 : brush.size) * scale;
   const canvasClass = tool === 'camera' ? 'camera' : tool === 'eyedropper' ? 'pick' : blocked && EDITS.includes(tool) ? 'blocked' : tool === 'fill' ? 'fill' : tool === 'text' ? 'text' : tool === 'select' ? `select${selHover ? ` ${selHover}` : ''}` : 'draw';
   const hs = 10 / vs; // handle size in project px
 
@@ -1025,14 +1118,14 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
             {g?.type === 'lasso' && (
               <polyline points={g.points.map((p) => p.join(',')).join(' ')} fill="rgba(240,164,58,0.08)" stroke="#f0a43a" strokeWidth={1.5 / vs} strokeDasharray={`${5 / vs} ${4 / vs}`} />
             )}
-            {box && paintSel && (
+            {box && paintSel && g?.type !== 'warp' && (
               <polygon
                 points={paintSel.map((p) => p.join(',')).join(' ')}
                 transform={g && (g.type === 'move' || g.type === 'scale') ? `matrix(${g.matrix.join(' ')})` : undefined}
                 fill="none" stroke="#f0a43a" strokeWidth={1.5 / vs} strokeDasharray={`${5 / vs} ${4 / vs}`}
               />
             )}
-            {box && mask && (
+            {box && mask && g?.type !== 'warp' && (
               // The selection's own edges: a rim just outside the selected strokes.
               <g transform={g && (g.type === 'move' || g.type === 'scale') ? `matrix(${g.matrix.join(' ')})` : undefined}>
                 <filter id="selection-edge" x={mask.x - 8} y={mask.y - 8} width={mask.width + 16} height={mask.height + 16} filterUnits="userSpaceOnUse">
@@ -1048,7 +1141,20 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
                 <image className="selection-edge" href={mask.url} x={mask.x} y={mask.y} width={mask.width} height={mask.height} filter="url(#selection-edge)" />
               </g>
             )}
-            {box && (
+            {box && warp && !isRef && (() => {
+              const grid = g?.type === 'warp' ? g.grid : startGrid(warpBox(box));
+              const p = grid.pts;
+              const lines = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8]];
+              return (
+                <g className="warp-grid">
+                  {lines.map((l, i) => (
+                    <polyline key={i} points={l.map((k) => p[k].join(',')).join(' ')} fill="none" stroke="#f0a43a" strokeWidth={1 / vs} strokeDasharray={`${4 / vs} ${3 / vs}`} />
+                  ))}
+                  {p.map(([cx, cy], i) => <circle key={i} cx={cx} cy={cy} r={hs / 2} fill="#fff" stroke="#f0a43a" strokeWidth={1.5 / vs} />)}
+                </g>
+              );
+            })()}
+            {box && !(warp && !isRef) && (
               <g>
                 <rect x={box.x0} y={box.y0} width={box.x1 - box.x0} height={box.y1 - box.y0} fill="none" stroke="#f0a43a" strokeWidth={(mask || paintSel ? 1 : 1.5) / vs} strokeOpacity={mask || paintSel ? 0.45 : 1} strokeDasharray={`${6 / vs} ${4 / vs}`} />
                 {[[box.x0, box.y0], [box.x1, box.y0], [box.x1, box.y1], [box.x0, box.y1]].map(([cx, cy], i) => (

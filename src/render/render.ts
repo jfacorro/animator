@@ -48,8 +48,10 @@ function buildPath(s: Stroke, live: boolean): Path2D {
   const [a, b] = s.points;
   if (!a || !b) return path;
   if (kind === 'line') {
+    // Usually two points; bent shapes (Warp, Liquify) keep their outline as many.
     path.moveTo(a[0], a[1]);
-    path.lineTo(b[0], b[1]);
+    for (let i = 1; i < s.points.length; i++) path.lineTo(s.points[i][0], s.points[i][1]);
+    if (s.filled) path.closePath();
   } else if (kind === 'rect') {
     path.rect(Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1]));
   } else {
@@ -202,7 +204,7 @@ export function paintStroke(ctx: CanvasRenderingContext2D, s: Stroke, live = fal
     ctx.filter = `blur(${(s.size * s.softness * 0.3 * grow).toFixed(2)}px)`;
   }
   const color = s.erase ? '#000' : s.color;
-  const outline = kind === 'line' || ((kind === 'rect' || kind === 'ellipse') && !s.filled);
+  const outline = (kind === 'line' || kind === 'rect' || kind === 'ellipse') && !s.filled;
   if (outline) {
     ctx.strokeStyle = color;
     ctx.lineWidth = s.size;
@@ -854,4 +856,98 @@ export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, fr
   }
   poolUsed = 0;
   ctx.restore();
+}
+
+/** Liquify on paint: pixels within `radius` of `at` slide along by `delta`, less towards the edge. */
+export function pushPixels(sheet: HTMLCanvasElement, at: [number, number], delta: [number, number], radius: number) {
+  const { width: w, height: h } = sheet;
+  const reach = Math.ceil(radius + Math.hypot(delta[0], delta[1]));
+  const bx = Math.max(0, Math.floor(at[0] - reach)), by = Math.max(0, Math.floor(at[1] - reach));
+  const bw = Math.min(w, Math.ceil(at[0] + reach)) - bx, bh = Math.min(h, Math.ceil(at[1] + reach)) - by;
+  if (bw <= 0 || bh <= 0) return;
+  const ctx = sheet.getContext('2d', { willReadFrequently: true })!;
+  const img = ctx.getImageData(bx, by, bw, bh);
+  const dst = img.data;
+  const src = new Uint8ClampedArray(dst);
+  const r2 = radius * radius;
+  for (let y = 0; y < bh; y++) {
+    for (let x = 0; x < bw; x++) {
+      const dx = bx + x + 0.5 - at[0], dy = by + y + 0.5 - at[1];
+      const d2 = dx * dx + dy * dy;
+      if (d2 >= r2) continue;
+      const f = (1 - d2 / r2) ** 2;
+      // Where this pixel's colour comes from: back along the push.
+      const sx = Math.min(bw - 1.001, Math.max(0, x - delta[0] * f));
+      const sy = Math.min(bh - 1.001, Math.max(0, y - delta[1] * f));
+      const x0 = Math.floor(sx), y0 = Math.floor(sy), fx = sx - x0, fy = sy - y0;
+      const i00 = (y0 * bw + x0) * 4, i10 = i00 + 4, i01 = i00 + bw * 4, i11 = i01 + 4;
+      const o = (y * bw + x) * 4;
+      // Blend premultiplied, so see-through pixels don't bleed dark edges.
+      let a = 0;
+      const acc = [0, 0, 0];
+      for (const [i, wgt] of [[i00, (1 - fx) * (1 - fy)], [i10, fx * (1 - fy)], [i01, (1 - fx) * fy], [i11, fx * fy]] as const) {
+        const al = src[i + 3] * wgt;
+        a += al;
+        acc[0] += src[i] * al; acc[1] += src[i + 1] * al; acc[2] += src[i + 2] * al;
+      }
+      dst[o + 3] = a;
+      if (a > 0) { dst[o] = acc[0] / a; dst[o + 1] = acc[1] / a; dst[o + 2] = acc[2] / a; }
+    }
+  }
+  ctx.putImageData(img, bx, by);
+}
+
+/**
+ * Warp on paint: the pixels inside `region` bent through `warp` (a function from
+ * where a point was to where it goes, over `box`), drawn as a mesh of small triangles.
+ */
+export function warpPaintRegion(sheet: HTMLCanvasElement, region: [number, number][], box: { x0: number; y0: number; x1: number; y1: number }, warp: (x: number, y: number) => [number, number]): HTMLCanvasElement {
+  const { width: w, height: h } = sheet;
+  // The selected pixels on their own, and the sheet without them.
+  const piece = makeCanvas(w, h);
+  const pctx = piece.getContext('2d')!;
+  const outline = (c: CanvasRenderingContext2D) => {
+    c.beginPath();
+    region.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
+    c.closePath();
+  };
+  outline(pctx);
+  pctx.clip();
+  pctx.drawImage(sheet, 0, 0);
+  const out = movePaintRegion(sheet, region, [1, 0, 0, 1, 0, 0], { remove: true });
+  const ctx = out.getContext('2d')!;
+  const N = 12;
+  const bw = box.x1 - box.x0, bh = box.y1 - box.y0;
+  const at = (i: number, j: number): [number, number] => [box.x0 + (bw * i) / N, box.y0 + (bh * j) / N];
+  const tri = (s: [number, number][], d: [number, number][]) => {
+    // The affine map taking triangle s onto triangle d, with a hair of overlap to hide seams.
+    const [[x0, y0], [x1, y1], [x2, y2]] = s;
+    const [[u0, v0], [u1, v1], [u2, v2]] = d;
+    const den = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
+    if (!den) return;
+    const a = ((u1 - u0) * (y2 - y0) - (u2 - u0) * (y1 - y0)) / den;
+    const b = ((v1 - v0) * (y2 - y0) - (v2 - v0) * (y1 - y0)) / den;
+    const c = ((u2 - u0) * (x1 - x0) - (u1 - u0) * (x2 - x0)) / den;
+    const dd = ((v2 - v0) * (x1 - x0) - (v1 - v0) * (x2 - x0)) / den;
+    const e = u0 - a * x0 - c * y0, f = v0 - b * x0 - dd * y0;
+    const cx = (u0 + u1 + u2) / 3, cy = (v0 + v1 + v2) / 3;
+    const grow = (p: [number, number]): [number, number] => { const l = Math.hypot(p[0] - cx, p[1] - cy) || 1; return [p[0] + ((p[0] - cx) / l) * 0.6, p[1] + ((p[1] - cy) / l) * 0.6]; };
+    ctx.save();
+    ctx.beginPath();
+    d.map(grow).forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.closePath();
+    ctx.clip();
+    ctx.setTransform(a, b, c, dd, e, f);
+    ctx.drawImage(piece, 0, 0);
+    ctx.restore();
+  };
+  for (let j = 0; j < N; j++) {
+    for (let i = 0; i < N; i++) {
+      const s00 = at(i, j), s10 = at(i + 1, j), s01 = at(i, j + 1), s11 = at(i + 1, j + 1);
+      const [d00, d10, d01, d11] = [s00, s10, s01, s11].map(([x, y]) => warp(x, y));
+      tri([s00, s10, s11], [d00, d10, d11]);
+      tri([s00, s11, s01], [d00, d11, d01]);
+    }
+  }
+  return out;
 }
