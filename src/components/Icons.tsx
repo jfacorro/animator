@@ -59,3 +59,7 @@ export const PaintLayer = () => <Icon size={16}><path d="M4 20c3 0 5-2 5-4a3 3 0
 export const Text = () => <Icon><path d="M5 6V4h14v2M12 4v16M9 20h6" /></Icon>;
 export const Keyboard = () => <Icon size={16}><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" /></Icon>;
 export const Sliders = () => <Icon size={18}><path d="M4 7h9M17 7h3M4 17h3M11 17h9" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="17" r="2" /></Icon>;
+export const Check = () => <Icon size={14}><path d="M5 12.5l4.5 4.5L19 7.5" /></Icon>;
+export const Warning = () => <Icon size={14}><path d="M12 4l9 16H3z" /><path d="M12 10v4M12 17h.01" /></Icon>;
+export const PauseSmall = () => <Icon size={14}><path d="M9 6v12M15 6v12" /></Icon>;
+export const Spinner = () => <Icon size={14}><path d="M12 3a9 9 0 1 0 9 9" /></Icon>;

@@ -287,17 +287,20 @@ input[type='checkbox'] { accent-color: var(--accent); }
   border: 1px solid var(--accent); border-radius: 4px; padding: 1px 4px;
 }
 
-/* Auto-save to file status */
+/* Auto-save to file: the file's name, with a wheel while saving and a check once saved.
+   The icon has a fixed size and the name doesn't change, so nothing beside it moves. */
 .file-status {
-  margin-left: 10px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  border: 0; background: transparent; font-family: inherit; padding: 0;
-  /* Always the same width, whatever it says, so the buttons beside it don't shift while it saves. */
-  flex: 0 0 200px; width: 200px; text-align: left;
+  margin-left: 6px; font-size: 12px; color: var(--muted); white-space: nowrap; display: inline-flex; align-items: center; gap: 6px;
+  border: 0; background: transparent; font-family: inherit; padding: 0; flex-shrink: 1; min-width: 0;
 }
-.file-status.error { color: var(--danger); }
-button.file-status.paused {
-  text-align: center; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 3px 10px; cursor: pointer;
-}
+.file-status .file-name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.save-icon { width: 14px; height: 14px; flex: 0 0 14px; display: inline-flex; }
+.file-status.saved .save-icon { color: #6fbf73; }
+.file-status.saving .save-icon svg { animation: save-spin 0.8s linear infinite; }
+.file-status.error, .file-status.error .save-icon { color: var(--danger); }
+button.file-status.paused { color: var(--accent); cursor: pointer; }
+button.file-status.paused:hover .file-name { text-decoration: underline; }
+@keyframes save-spin { to { transform: rotate(360deg); } }
 
 /* Brushes and palette */
 .presets { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
@@ -471,7 +474,7 @@ button.file-status.paused {
   .tool-bar { padding: 2px 8px; }
   .tool-bar .icon-btn { width: 36px; height: 36px; }
   .tool-options { gap: 10px; padding: 8px 10px; }
-  .tool-options .hint, .file-status, .brand-name { display: none; }
+  .tool-options .hint, .file-status .file-name, .brand-name { display: none; }
   .topbar .spacer { flex: 0 0 4px; }
   .project-name { width: 130px; }
   .timeline-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 4px 8px; gap: 8px; }
