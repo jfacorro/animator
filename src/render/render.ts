@@ -118,6 +118,28 @@ export function drawingPasses(strokes: Stroke[]): { fills: Stroke[]; lines: Stro
   return { fills, lines };
 }
 
+/**
+ * The selected strokes' shape as a solid silhouette, cropped to its box, so the
+ * selection can be outlined along its real edges. Eraser strokes are left out.
+ */
+export function selectionMask(strokes: Stroke[], indices: number[], box: { x0: number; y0: number; x1: number; y1: number }) {
+  const pad = 4;
+  const x = Math.floor(box.x0) - pad;
+  const y = Math.floor(box.y0) - pad;
+  const width = Math.ceil(box.x1) + pad - x;
+  const height = Math.ceil(box.y1) + pad - y;
+  if (width <= 0 || height <= 0 || width * height > 16e6) return null;
+  const c = makeCanvas(width, height);
+  const ctx = c.getContext('2d')!;
+  ctx.translate(-x, -y);
+  for (const i of indices) {
+    const s = strokes[i];
+    if (!s || s.erase) continue;
+    paintStroke(ctx, { ...s, opacity: 1, softness: 0, color: '#000', gradient: undefined });
+  }
+  return { url: c.toDataURL('image/png'), x, y, width, height };
+}
+
 let fillSheet: HTMLCanvasElement | null = null;
 
 /** Paint a drawing's strokes, with its fills under its lines (see drawingPasses). */

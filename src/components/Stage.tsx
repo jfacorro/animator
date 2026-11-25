@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { scaleAbout, spansBox, strokeBounds, strokesInLasso, translate, unionBoxes, apply, type Box, type Matrix, type Vec } from '../model/geometry';
 import { addStroke, celIndexAt, drawingAt, setPaint, transformStrokes, type FontId, type Paint, type Point, type Project, type Stroke } from '../model/project';
 import { floodFillSpans } from '../render/fill';
 import { catchUp, stabilize } from '../model/brushes';
 import { groupOf } from '../model/groups';
 import { cameraAt, cameraCorners, hasCamera, setCameraKey, type CameraView } from '../model/camera';
-import { bakePaint, composeFrame, paintReady, fontCss, LINE_HEIGHT, measureText, onImageLoad, paintSource, paintStroke, type OnionOptions } from '../render/render';
+import { bakePaint, composeFrame, paintReady, fontCss, LINE_HEIGHT, measureText, onImageLoad, paintSource, paintStroke, selectionMask, type OnionOptions } from '../render/render';
 import { placeReference, rulerStep, snapToGuides, symmetricStrokes, type GuideAxis, type Symmetry } from '../model/aids';
 import { addGuide, moveGuide, removeGuide } from '../model/aids';
 import { tapDown, tapMove, tapUp, type Taps } from '../model/taps';
@@ -151,6 +151,12 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   const scale = display.w / project.width;
   /** Screen px per project px, including zoom. */
   const vs = scale * view.zoom;
+  // The selected strokes' silhouette, outlined on the overlay along their real edges.
+  const mask = useMemo(() => {
+    if (tool !== 'select' || !selection || !drawing || layer?.reference) return null;
+    const box = unionBoxes(selection.map((i) => (drawing.strokes[i] && !drawing.strokes[i].erase ? strokeBounds(drawing.strokes[i]) : null)));
+    return box ? selectionMask(drawing.strokes, selection, box) : null;
+  }, [tool, selection, drawing, layer?.reference]);
 
   // Start decoding paint layers' pixels early, so playback doesn't wait on them.
   useEffect(() => { void paintReady(project); }, [project.drawings]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -866,9 +872,25 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
             {g?.type === 'lasso' && (
               <polyline points={g.points.map((p) => p.join(',')).join(' ')} fill="rgba(240,164,58,0.08)" stroke="#f0a43a" strokeWidth={1.5 / vs} strokeDasharray={`${5 / vs} ${4 / vs}`} />
             )}
+            {box && mask && (
+              // The selection's own edges: a rim just outside the selected strokes.
+              <g transform={g && (g.type === 'move' || g.type === 'scale') ? `matrix(${g.matrix.join(' ')})` : undefined}>
+                <filter id="selection-edge" x={mask.x - 8} y={mask.y - 8} width={mask.width + 16} height={mask.height + 16} filterUnits="userSpaceOnUse">
+                  <feMorphology in="SourceAlpha" operator="dilate" radius={3 / vs} result="outer" />
+                  <feMorphology in="SourceAlpha" operator="dilate" radius={2 / vs} result="inner" />
+                  <feFlood floodColor="#fff" />
+                  <feComposite in2="outer" operator="in" result="halo" />
+                  <feFlood floodColor="#f0a43a" />
+                  <feComposite in2="inner" operator="in" result="edge" />
+                  <feMerge><feMergeNode in="halo" /><feMergeNode in="edge" /></feMerge>
+                  <feComposite in2="SourceAlpha" operator="out" />
+                </filter>
+                <image className="selection-edge" href={mask.url} x={mask.x} y={mask.y} width={mask.width} height={mask.height} filter="url(#selection-edge)" />
+              </g>
+            )}
             {box && (
               <g>
-                <rect x={box.x0} y={box.y0} width={box.x1 - box.x0} height={box.y1 - box.y0} fill="none" stroke="#f0a43a" strokeWidth={1.5 / vs} strokeDasharray={`${6 / vs} ${4 / vs}`} />
+                <rect x={box.x0} y={box.y0} width={box.x1 - box.x0} height={box.y1 - box.y0} fill="none" stroke="#f0a43a" strokeWidth={(mask ? 1 : 1.5) / vs} strokeOpacity={mask ? 0.45 : 1} strokeDasharray={`${6 / vs} ${4 / vs}`} />
                 {[[box.x0, box.y0], [box.x1, box.y0], [box.x1, box.y1], [box.x0, box.y1]].map(([cx, cy], i) => (
                   <rect key={i} x={cx - hs / 2} y={cy - hs / 2} width={hs} height={hs} fill="#fff" stroke="#f0a43a" strokeWidth={1.5 / vs} />
                 ))}
