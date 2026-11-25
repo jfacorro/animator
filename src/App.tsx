@@ -658,6 +658,22 @@ export default function App() {
     }
   };
 
+  const psdInput = useRef<HTMLInputElement>(null);
+  /** A Photoshop file becomes a new animation, each of its layers a paint layer. */
+  const openPsd = async (file: File) => {
+    if (!window.confirm('Open this PSD as a new animation? The current one will be replaced. Save it to a file first if you want to keep it.')) return;
+    try {
+      const { importPsd } = await import('./export/psd');
+      const p = await importPsd(file);
+      linkFile(null, null);
+      setHistory(initHistory(p));
+      setActiveLayerId(p.layers.at(-1)!.id);
+      setFrame(0);
+    } catch (err) {
+      window.alert(err instanceof Error ? `Could not open that PSD: ${err.message}` : 'Could not open that PSD.');
+    }
+  };
+
   /** Open with the file picker where possible, so later changes auto-save back to that file. */
   const openProject = async () => {
     setMenuOpen(false);
@@ -772,6 +788,7 @@ export default function App() {
                   <option value="navigate">Move the canvas</option>
                 </select>
               </label>
+              <button onClick={() => { setMenuOpen(false); psdInput.current?.click(); }} title="Open a Photoshop file (PSD, also from Procreate) as a new animation: each of its layers becomes a paint layer">Open PSD…</button>
               <button onClick={openProject} title={canSaveToFile() ? 'Open an animation file. Changes then save back to it automatically.' : 'Open an animation saved with Save to file'}>Open from file…</button>
               {canSaveToFile() ? (
                 <>
@@ -790,6 +807,10 @@ export default function App() {
           <input
             ref={imageInput} type="file" accept="image/*" hidden
             onChange={(e) => { const f = e.target.files?.[0]; if (f) addReference(f); e.target.value = ''; }}
+          />
+          <input
+            ref={psdInput} type="file" accept=".psd,image/vnd.adobe.photoshop" hidden
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) openPsd(f); e.target.value = ''; }}
           />
           <input
             ref={fileInput} type="file" accept=".json,application/json" hidden
@@ -1126,7 +1147,7 @@ export default function App() {
           onChange={(patch) => setBrush((b) => ({ ...b, ...patch }))} onClose={() => setBrushEditor(false)}
         />
       )}
-      {exporting && <ExportDialog project={project} pingPong={playMode === 'pingpong'} onClose={() => setExporting(false)} />}
+      {exporting && <ExportDialog project={project} frame={frame} pingPong={playMode === 'pingpong'} onClose={() => setExporting(false)} />}
     </div>
   );
 }

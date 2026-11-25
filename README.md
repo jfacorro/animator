@@ -129,7 +129,7 @@ you use them in: to move an animation between devices or browsers, use
   where it starts. It plays along with playback, and with *Scrub sound* on,
   each frame step plays that frame's slice for lip-sync. The scene runs at
   least as long as the sound. GIF export has no sound.
-- **Export.** Three formats, all made in the browser:
+- **Export.** Four formats, all made in the browser:
   - *GIF* with [gifenc](https://github.com/mattdesl/gifenc). Held drawings
     become a single GIF frame with a longer delay, so files stay small.
   - *MP4* video (H.264, or VP9 where H.264 isn't available) with the sound
@@ -140,7 +140,14 @@ you use them in: to move an animation between devices or browsers, use
     a zip, made with [fflate](https://github.com/101arrowz/fflate), with a
     transparent background if you like. Good for video editors.
 
-  Sizes go from half to double the canvas size.
+  - *PSD*: the frame you're on as a Photoshop file, with every layer (and
+    group) kept apart with its name, opacity, blend mode and clipping, made
+    with [ag-psd](https://github.com/Agamnentzar/ag-psd). Photoshop,
+    Procreate, Krita and others open it.
+
+  Sizes go from half to double the canvas size. *Open PSD…* in the ⋯ menu
+  goes the other way: a Photoshop file becomes a new animation with each of
+  its layers as a paint layer.
 - **Speed.** Each drawing is rendered once to a bitmap that covers only the
   area it touches; bitmaps are kept within a memory budget and their canvases
   reused. Frames that show the same drawings as the last one (held drawings,

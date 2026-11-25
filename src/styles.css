@@ -211,7 +211,7 @@ input[type='checkbox'] { accent-color: var(--accent); }
 .preview img, .preview canvas, .preview video { width: 100%; height: 100%; object-fit: contain; display: block; }
 .dialog-form { display: flex; flex-direction: column; gap: 14px; }
 .dialog-form .row select { width: 190px; }
-.format-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.format-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .format-option { height: 54px; border-radius: 10px; border: 1px solid var(--border-2); background: var(--control); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
 .format-option.on { border-color: var(--accent); background: var(--accent-soft); }
 .format-option.on strong { color: var(--accent); }
