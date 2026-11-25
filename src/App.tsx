@@ -37,6 +37,8 @@ const TOOLS: { id: Tool; name: string; key: string; help: string; Icon: () => Re
   { id: 'eyedropper', name: 'Eyedropper', key: 'i', help: 'pick a colour from the canvas', Icon: I.Dropper },
   { id: 'select', name: 'Lasso select', key: 's', help: 'select strokes to move, resize, flip or delete', Icon: I.Lasso },
   { id: 'liquify', name: 'Liquify', key: 'w', help: 'push lines or paint around, like a finger in wet paint, to nudge a pose or squash and stretch', Icon: I.Liquify },
+  { id: 'smudge', name: 'Smudge', key: 'u', help: 'drag colours into each other on a paint layer, like a finger in wet paint', Icon: I.Smudge },
+  { id: 'blur', name: 'Blur', key: 'j', help: 'soften paint under the brush on a paint layer', Icon: I.Blur },
   { id: 'camera', name: 'Camera', key: 'k', help: 'frame the shot: pan, zoom and rotate the camera, keyed over time', Icon: I.Camera },
 ];
 const COLOUR_TOOLS: Tool[] = ['brush', 'line', 'rect', 'ellipse', 'fill', 'text', 'eyedropper'];
@@ -74,7 +76,7 @@ const MAX_PALETTE = 24;
 
 const INK = PRESETS.find((p) => p.id === 'ink')!;
 const DEFAULT_BRUSH: BrushSettings = {
-  color: '#1a1a1a', eraserSize: 24, liquifySize: 80, pressure: true, fillShapes: false,
+  color: '#1a1a1a', eraserSize: 24, liquifySize: 80, fxSize: 40, fxStrength: 0.6, pressure: true, fillShapes: false,
   fillMode: 'solid', color2: '#ffffff', fadeOut: true, font: 'sans', textSize: 48, bold: false,
   size: INK.size, opacity: INK.opacity, smoothing: INK.smoothing, stabilizer: INK.stabilizer, thinning: INK.thinning, softness: INK.softness,
 };
@@ -97,7 +99,7 @@ const SYMMETRY: { id: Symmetry; name: string }[] = [
   { id: 'off', name: 'Off' }, { id: 'x', name: 'Left–right' }, { id: 'y', name: 'Top–bottom' }, { id: 'xy', name: 'Both' },
 ];
 /** The size each tool's [ and ] change, and its range. */
-type SizeKey = 'size' | 'eraserSize' | 'liquifySize' | 'textSize';
+type SizeKey = 'size' | 'eraserSize' | 'liquifySize' | 'fxSize' | 'textSize';
 const SIZED: Partial<Record<Tool, { key: SizeKey; min: number; max: number }>> = {
   brush: { key: 'size', min: 1, max: 60 },
   line: { key: 'size', min: 1, max: 60 },
@@ -105,6 +107,8 @@ const SIZED: Partial<Record<Tool, { key: SizeKey; min: number; max: number }>> =
   ellipse: { key: 'size', min: 1, max: 60 },
   eraser: { key: 'eraserSize', min: 1, max: 120 },
   liquify: { key: 'liquifySize', min: 10, max: 400 },
+  smudge: { key: 'fxSize', min: 4, max: 300 },
+  blur: { key: 'fxSize', min: 4, max: 300 },
   text: { key: 'textSize', min: 8, max: 240 },
 };
 /** One step smaller or bigger: 1 px for thin sizes, about a tenth for big ones, so every range takes a similar number of presses. */
@@ -756,6 +760,19 @@ export default function App() {
             />
             <span className="value">{size} px</span>
           </label>
+        )}
+        {(tool === 'smudge' || tool === 'blur') && (
+          <>
+            <label title="Width of the brush ([ and ] to change)">Size
+              <input type="range" min={4} max={300} value={brush.fxSize ?? 40} onChange={(e) => setBrush((b) => ({ ...b, fxSize: Number(e.target.value) }))} />
+              <span className="value">{brush.fxSize ?? 40} px</span>
+            </label>
+            <label title={tool === 'smudge' ? 'How far each stroke drags the colour' : 'How much each pass softens the paint'}>Strength
+              <input type="range" min={5} max={100} value={Math.round((brush.fxStrength ?? 0.6) * 100)} onChange={(e) => setBrush((b) => ({ ...b, fxStrength: Number(e.target.value) / 100 }))} />
+              <span className="value">{pct(brush.fxStrength ?? 0.6)}</span>
+            </label>
+            {!activeLayer?.paint && <span className="hint">Works on paint layers</span>}
+          </>
         )}
         {tool === 'liquify' && (
           <>

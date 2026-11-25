@@ -5,7 +5,7 @@ import { floodFillSpans } from '../render/fill';
 import { catchUp, stabilize } from '../model/brushes';
 import { groupOf } from '../model/groups';
 import { cameraAt, cameraCorners, hasCamera, setCameraKey, type CameraView } from '../model/camera';
-import { bakePaint, composeFrame, encodePaint, livePaint, movePaintRegion, mulMatrix, paintSheet, PAPER, pushPixels, warpPaintRegion, paintReady, fontCss, LINE_HEIGHT, measureText, onImageLoad, paintSource, paintStroke, selectionMask, type OnionOptions } from '../render/render';
+import { bakePaint, composeFrame, encodePaint, livePaint, movePaintRegion, mulMatrix, paintSheet, PAPER, pushPixels, warpPaintRegion, smudgeStep, blurStep, paintReady, fontCss, LINE_HEIGHT, measureText, onImageLoad, paintSource, paintStroke, selectionMask, type OnionOptions } from '../render/render';
 import { placeReference, rulerStep, snapToGuides, symmetricStrokes, type GuideAxis, type Symmetry } from '../model/aids';
 import { addGuide, moveGuide, removeGuide } from '../model/aids';
 import { tapDown, tapMove, tapUp, type Taps } from '../model/taps';
@@ -15,7 +15,7 @@ import { FIT_VIEW, flipAt, pinch, rotateAt, screenToLocal, snapRotation, viewTra
 import * as I from './Icons';
 import { actionFor, displayKey, keyOf, type Keymap } from '../keys';
 
-export type Tool = 'brush' | 'eraser' | 'line' | 'rect' | 'ellipse' | 'fill' | 'text' | 'eyedropper' | 'select' | 'liquify' | 'camera';
+export type Tool = 'brush' | 'eraser' | 'line' | 'rect' | 'ellipse' | 'fill' | 'text' | 'eyedropper' | 'select' | 'liquify' | 'smudge' | 'blur' | 'camera';
 
 export interface BrushSettings {
   color: string;
@@ -23,6 +23,9 @@ export interface BrushSettings {
   eraserSize: number;
   /** Liquify: how wide an area moves with the pointer. */
   liquifySize?: number;
+  /** Smudge and Blur: brush width and how strongly each dab works (0–1). */
+  fxSize?: number;
+  fxStrength?: number;
   smoothing: number;
   pressure: boolean;
   /** 0–1: see-through to solid. Also used by shapes and fills. */
@@ -106,6 +109,7 @@ type Gesture =
   | { type: 'move'; pointerId: number; start: Vec; matrix: Matrix }
   | { type: 'liquify'; pointerId: number; last: Vec; strokes?: Stroke[]; sheet?: HTMLCanvasElement; changed: boolean }
   | { type: 'warp'; pointerId: number; handle: number; grid: Grid }
+  | { type: 'smear'; pointerId: number; mode: 'smudge' | 'blur'; last: Vec; sheet: HTMLCanvasElement; changed: boolean }
   | { type: 'scale'; pointerId: number; origin: Vec; corner: Vec; matrix: Matrix }
   | { type: 'camera'; pointerId: number; mode: 'move' | 'zoom'; start: Vec; base: CameraView; view: CameraView };
 
@@ -132,7 +136,7 @@ function movedRect(r: { x: number; y: number; width: number; height: number }, m
   const b = apply(m, r.x + r.width, r.y + r.height);
   return { x: Math.min(a[0], b[0]), y: Math.min(a[1], b[1]), width: Math.abs(b[0] - a[0]), height: Math.abs(b[1] - a[1]) };
 }
-const EDITS: Tool[] = ['brush', 'eraser', 'line', 'rect', 'ellipse', 'fill', 'text', 'select', 'liquify'];
+const EDITS: Tool[] = ['brush', 'eraser', 'line', 'rect', 'ellipse', 'fill', 'text', 'select', 'liquify', 'smudge', 'blur'];
 
 /** The box around an outline. */
 function outlineBox(pts: Vec[]): Box {
@@ -173,6 +177,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   const isRef = !!layer?.reference;
   const blocked = !layer ? 'Pick a layer to draw on'
     : isRef && tool !== 'select' ? 'This is a reference image: pick another layer to draw on. Use the Lasso tool to move or resize it.'
+    : (tool === 'smudge' || tool === 'blur') && !layer.paint ? 'Smudge and Blur work on paint layers. Add one with the brush button in Layers.'
     : layer.locked ? 'This layer is locked' : group?.locked ? 'This layer\'s group is locked'
     : !layer.visible ? 'This layer is hidden' : group && !group.visible ? 'This layer\'s group is hidden' : null;
   const drawing = layer ? drawingAt(project, layer, frame) : null;
@@ -284,6 +289,7 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       shown = g.sheet ? setPaint(project, activeLayerId, frame, livePaint(g.sheet)) : replaceStrokes(project, activeLayerId, frame, g.strokes!);
     }
     if (g?.type === 'warp') shown = warped(g.grid) ?? shown;
+    if (g?.type === 'smear' && g.changed) shown = setPaint(project, activeLayerId, frame, livePaint(g.sheet));
     const live = g && (g.type === 'stroke' || g.type === 'shape' || g.type === 'gradient')
       ? { layerId: activeLayerId, strokes: symmetricStrokes(g.stroke, symmetry, project.width, project.height).map(lockStroke) } : null;
     composeFrame(ctx, shown, frame, { paper: true, onion, live, camera: playing, references: !playing });
@@ -696,6 +702,16 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       return;
     }
 
+    if (tool === 'smudge' || tool === 'blur') {
+      let sheet: HTMLCanvasElement;
+      try { sheet = paintSheet(drawing?.paint, project.width, project.height); }
+      catch (err) { flash((err as Error).message); return; }
+      const g: Gesture = { type: 'smear', pointerId: id, mode: tool, last: [x, y], sheet, changed: false };
+      gestureRef.current = g;
+      if (tool === 'blur') { blurStep(sheet, [x, y], (brush.fxSize ?? 40) / 2, brush.fxStrength ?? 0.6); g.changed = true; schedulePaint(); }
+      return;
+    }
+
     if (tool === 'liquify') {
       let sheet: HTMLCanvasElement | undefined;
       if (layer?.paint) {
@@ -901,6 +917,19 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
         }
         g.last = [x, y];
       }
+    } else if (g.type === 'smear') {
+      const r = (brush.fxSize ?? 40) / 2, k = brush.fxStrength ?? 0.6;
+      const d = Math.hypot(x - g.last[0], y - g.last[1]);
+      if (d >= Math.max(1, r / 6)) {
+        if (g.mode === 'smudge') smudgeStep(g.sheet, g.last, [x, y], r, k);
+        else {
+          // Dabs along the way, a quarter of the brush apart.
+          const n = Math.max(1, Math.ceil(d / Math.max(1, r / 2)));
+          for (let i = 1; i <= n; i++) blurStep(g.sheet, [g.last[0] + ((x - g.last[0]) * i) / n, g.last[1] + ((y - g.last[1]) * i) / n], r, k);
+        }
+        g.changed = true;
+        g.last = [x, y];
+      }
     } else if (g.type === 'warp') {
       g.grid = { ...g.grid, pts: g.grid.pts.map((p, i) => (i === g.handle ? [x, y] : p)) };
     } else if (g.type === 'lasso') {
@@ -943,6 +972,12 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
       if (v !== g.base) onCommit((p) => setCameraKey(p, frame, v));
       else paint();
       setOverlayTick((t) => t + 1);
+    } else if (g.type === 'smear') {
+      if (!g.changed) paint();
+      else {
+        const next = encodePaint(g.sheet, project.width, project.height);
+        onCommit((p) => setPaint(p, activeLayerId, frame, next));
+      }
     } else if (g.type === 'liquify') {
       if (!g.changed) paint();
       else if (g.sheet) {
@@ -1066,8 +1101,8 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   const camView = g?.type === 'camera' ? g.view : !playing && (tool === 'camera' || hasCamera(project)) ? cameraAt(project, frame) : null;
   const camCorners = camView ? cameraCorners(camView, project.width, project.height) : null;
   const camActive = tool === 'camera';
-  const showBrushCursor = (tool === 'brush' || tool === 'eraser' || tool === 'liquify') && cursor && !blocked && !panKey && !navigating;
-  const cursorSize = (tool === 'eraser' ? brush.eraserSize : tool === 'liquify' ? brush.liquifySize ?? 80 : brush.size) * scale;
+  const showBrushCursor = (tool === 'brush' || tool === 'eraser' || tool === 'liquify' || tool === 'smudge' || tool === 'blur') && cursor && !blocked && !panKey && !navigating;
+  const cursorSize = (tool === 'eraser' ? brush.eraserSize : tool === 'liquify' ? brush.liquifySize ?? 80 : tool === 'smudge' || tool === 'blur' ? brush.fxSize ?? 40 : brush.size) * scale;
   const canvasClass = tool === 'camera' ? 'camera' : tool === 'eyedropper' ? 'pick' : blocked && EDITS.includes(tool) ? 'blocked' : tool === 'fill' ? 'fill' : tool === 'text' ? 'text' : tool === 'select' ? `select${selHover ? ` ${selHover}` : ''}` : 'draw';
   const hs = 10 / vs; // handle size in project px
 

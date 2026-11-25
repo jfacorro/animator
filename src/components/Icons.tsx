@@ -41,6 +41,8 @@ export const Bucket = () => <Icon size={20}><path d="M5 11l7-7 7 7-7 7z" /><path
 export const Dropper = () => <Icon size={20}><path d="M14 4l6 6" /><path d="M17 7l-9 9-3 1 1-3 9-9" /><path d="M15 3l6 6" /></Icon>;
 export const Lasso = () => <Icon size={20}><ellipse cx="12" cy="9" rx="8" ry="5" strokeDasharray="3 2.5" /><path d="M7 13c-1 2 0 4 2 4s2 2 1 4" /></Icon>;
 export const Liquify = () => <Icon size={20}><path d="M4 8c3-3 6 3 9 0s5-2 7 0" /><path d="M4 14c3-3 6 3 9 0s5-2 7 0" /><path d="M9 20c1-2 3-2 4 0" /></Icon>;
+export const Smudge = () => <Icon size={20}><path d="M8 3c0 4 0 6 2 8l6 6a2.5 2.5 0 0 1-3.5 3.5l-6-6C4.5 12.5 4 9 6 6" /><path d="M14 4c2 1 3 2 4 4" /></Icon>;
+export const Blur = () => <Icon size={20}><path d="M12 3c3 4 6 7 6 11a6 6 0 0 1-12 0c0-4 3-7 6-11z" /><path d="M9 14h6M10 17h4" strokeDasharray="1.5 1.5" /></Icon>;
 export const Minus = () => <Icon size={16}><path d="M5 12h14" /></Icon>;
 export const RotateLeft = () => <Icon size={16}><path d="M4 4v5h5" /><path d="M4.5 9A8 8 0 1 1 6 17" /></Icon>;
 export const RotateRight = () => <Icon size={16}><path d="M20 4v5h-5" /><path d="M19.5 9A8 8 0 1 0 18 17" /></Icon>;
