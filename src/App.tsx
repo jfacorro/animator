@@ -59,20 +59,22 @@ const PEN_SEEN_KEY = 'animator:pen-seen';
 type Fingers = 'auto' | 'draw' | 'navigate';
 
 interface Panels {
-  tools: number;
+  /** Width of the left panel with the current tool's settings. */
+  options: number;
   layers: number;
   timeline: number;
+  /** The bar of tools under the top bar. */
   hideTools: boolean;
   hideLayers: boolean;
   hideTimeline: boolean;
-  /** The bar with the current tool's settings, under the top bar. */
+  /** The left panel with the current tool's settings. */
   hideOptions: boolean;
 }
-const DEFAULT_PANELS: Panels = { tools: 60, layers: 280, timeline: 220, hideTools: false, hideLayers: false, hideTimeline: false, hideOptions: false };
+const DEFAULT_PANELS: Panels = { options: 230, layers: 280, timeline: 220, hideTools: false, hideLayers: false, hideTimeline: false, hideOptions: false };
 /** A phone, or a small window: start with the layers panel hidden and a short timeline. */
 const smallScreen = () => typeof window !== 'undefined' && (window.innerWidth < 760 || window.innerHeight < 520);
-const COMPACT_PANELS: Partial<Panels> = { layers: 220, timeline: 110, hideLayers: true };
-const PANEL_LIMITS = { tools: [52, 160], layers: [200, 560], timeline: [110, 640] } as const;
+const COMPACT_PANELS: Partial<Panels> = { options: 170, layers: 220, timeline: 110, hideLayers: true };
+const PANEL_LIMITS = { options: [150, 420], layers: [200, 560], timeline: [110, 640] } as const;
 const clampPanel = (k: keyof typeof PANEL_LIMITS, v: number) => Math.round(Math.min(PANEL_LIMITS[k][1], Math.max(PANEL_LIMITS[k][0], v)));
 const MAX_PALETTE = 24;
 
@@ -226,7 +228,7 @@ export default function App() {
   useEffect(() => { savePref(PANELS_KEY, panels); }, [panels]);
   /** Panel size when a resize drag started. */
   const panelStart = useRef<Panels | null>(null);
-  const resizePanel = (k: 'tools' | 'layers' | 'timeline') => (grow: number, done: boolean) => {
+  const resizePanel = (k: 'options' | 'layers' | 'timeline') => (grow: number, done: boolean) => {
     if (!panelStart.current) panelStart.current = panels;
     const base = panelStart.current[k];
     setPanels((p) => ({ ...p, [k]: clampPanel(k, base + grow) }));
@@ -664,6 +666,17 @@ export default function App() {
     }
   };
 
+  const addLineLayer = () => {
+    const r = P.addLayer(project, `Layer ${project.layers.length + 1}`, activeLayerId);
+    apply(() => r.project);
+    setActiveLayerId(r.layerId);
+  };
+  const addPaintLayer = () => {
+    const r = P.addLayer(project, `Paint ${project.layers.filter((l) => l.paint).length + 1}`, activeLayerId, { paint: true });
+    apply(() => r.project);
+    setActiveLayerId(r.layerId);
+  };
+
   const fileLinked = linked && linked.projectId === project.id ? linked : null;
 
   const isEraser = tool === 'eraser';
@@ -753,7 +766,23 @@ export default function App() {
         <button className="btn primary" title="Export the animation as a GIF" onClick={() => { setPlaying(false); setExporting(true); }}>Export</button>
       </header>
 
-      {!panels.hideOptions && <div className="tool-options">
+      {!panels.hideTools && <nav className="tool-bar" aria-label="Tools">
+        {TOOLS.map((t) => (
+          <button
+            key={t.id} className={`icon-btn${tool === t.id ? ' on' : ''}`} aria-label={t.name} aria-pressed={tool === t.id}
+            title={`${t.name}${keyHint(`tool.${t.id}` as ActionId)}: ${t.help}`} onClick={() => setTool(t.id)}
+          >
+            <t.Icon />
+          </button>
+        ))}
+        <div className="rail-sep" />
+        <button className="icon-btn" aria-label="Undo" title="Undo (Ctrl+Z)" disabled={!history.past.length} onClick={() => setHistory(undo)}><I.Undo /></button>
+        <button className="icon-btn" aria-label="Redo" title="Redo (Ctrl+Shift+Z)" disabled={!history.future.length} onClick={() => setHistory(redo)}><I.Redo /></button>
+      </nav>}
+      <Splitter side="top" label="the tools" collapsed={panels.hideTools} onToggle={() => togglePanel('hideTools')} />
+
+      <div className="workspace">
+      {!panels.hideOptions && <div className="tool-options" role="region" aria-label="Tool settings" style={{ width: panels.options }}>
         <span className="tool-name">{TOOLS.find((t) => t.id === tool)?.name}</span>
         {tool === 'brush' && (
           <div className="presets" role="group" aria-label="Brush presets">
@@ -945,23 +974,8 @@ export default function App() {
           </div>
         )}
       </div>}
-      <Splitter side="top" label="the tool settings" collapsed={panels.hideOptions} onToggle={() => togglePanel('hideOptions')} />
+      <Splitter side="left" label="the tool settings" collapsed={panels.hideOptions} onResize={resizePanel('options')} onToggle={() => togglePanel('hideOptions')} />
 
-      <div className="workspace">
-        {!panels.hideTools && <nav className={`tool-rail${panels.tools >= 100 ? ' wide' : ''}`} aria-label="Tools" style={{ width: panels.tools }}>
-          {TOOLS.map((t) => (
-            <button
-              key={t.id} className={`icon-btn${tool === t.id ? ' on' : ''}`} aria-label={t.name} aria-pressed={tool === t.id}
-              title={`${t.name}${keyHint(`tool.${t.id}` as ActionId)}: ${t.help}`} onClick={() => setTool(t.id)}
-            >
-              <t.Icon />
-            </button>
-          ))}
-          <div className="rail-sep" />
-          <button className="icon-btn" aria-label="Undo" title="Undo (Ctrl+Z)" disabled={!history.past.length} onClick={() => setHistory(undo)}><I.Undo /></button>
-          <button className="icon-btn" aria-label="Redo" title="Redo (Ctrl+Shift+Z)" disabled={!history.future.length} onClick={() => setHistory(redo)}><I.Redo /></button>
-        </nav>}
-        <Splitter side="left" label="the tools" collapsed={panels.hideTools} onResize={resizePanel('tools')} onToggle={() => togglePanel('hideTools')} />
 
         <Stage
           project={project} frame={frame} activeLayerId={activeLayerId} tool={tool} brush={brush} onion={onion$}
@@ -982,16 +996,8 @@ export default function App() {
           activeLayerId={activeLayerId}
           onion={onion}
           onSelect={setActiveLayerId}
-          onAdd={() => {
-            const r = P.addLayer(project, `Layer ${project.layers.length + 1}`, activeLayerId);
-            apply(() => r.project);
-            setActiveLayerId(r.layerId);
-          }}
-          onAddPaint={() => {
-            const r = P.addLayer(project, `Paint ${project.layers.filter((l) => l.paint).length + 1}`, activeLayerId, { paint: true });
-            apply(() => r.project);
-            setActiveLayerId(r.layerId);
-          }}
+          onAdd={addLineLayer}
+          onAddPaint={addPaintLayer}
           onRemove={(id) => apply((p) => P.removeLayer(p, id))}
           onMove={(id, delta) => apply((p) => P.moveLayer(p, id, delta))}
           onDrop={(id, kind, drop) => apply((p) => (kind === 'group' ? moveGroupToGap(p, id, drop.gap) : P.moveLayerToGap(p, id, drop.gap, drop.group)))}
@@ -1037,6 +1043,8 @@ export default function App() {
         onMoveCel={onMoveCel}
         onUpdateLayer={(id, patch) => apply((p) => P.updateLayer(p, id, patch))}
         onMoveLayerTo={(id, gap, group) => apply((p) => P.moveLayerToGap(p, id, gap, group))}
+        onAddLayer={addLineLayer}
+        onAddPaintLayer={addPaintLayer}
       /></div>}
 
       {toast && <div className="toast" role="status">{toast}</div>}
