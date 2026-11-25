@@ -165,6 +165,9 @@ export default function App() {
   const [brushEditor, setBrushEditor] = useState(false);
   /** Adjust colours: open, and the change shown on the canvas before it's applied. */
   const [adjusting, setAdjusting] = useState(false);
+  /** Painting the active layer's mask. */
+  const [maskEdit, setMaskEdit] = useState(false);
+  useEffect(() => { setMaskEdit(false); }, [activeLayerId]);
   const [adjustPreview, setAdjustPreview] = useState<P.Project | null>(null);
   const preset = matchingPreset(brush, savedBrushes);
   const usePreset = (p: BrushPreset) => setBrush((b) => ({
@@ -1008,7 +1011,7 @@ export default function App() {
 
         <Stage
           project={adjustPreview ?? project} frame={frame} activeLayerId={activeLayerId} tool={tool} brush={brush} onion={onion$}
-          selection={selection} onSelectionChange={setSelection} paintSelection={paintSel} onPaintSelectionChange={setPaintSel} warp={warp} onCommit={onCommit}
+          selection={selection} onSelectionChange={setSelection} paintSelection={paintSel} onPaintSelectionChange={setPaintSel} warp={warp} maskEdit={maskEdit} onCommit={onCommit}
           panKey={spaceHeld} onPanned={() => { spacePanned.current = true; }} playing={playing}
           keymap={keymap} symmetry={aids.symmetry} rulers={aids.rulers} onRulersChange={(rulers) => setAids((a) => ({ ...a, rulers }))}
           touchDraws={touchDraws} onUndo={() => setHistory(undo)} onRedo={() => setHistory(redo)}
@@ -1024,6 +1027,7 @@ export default function App() {
           frame={frame}
           activeLayerId={activeLayerId}
           onion={onion}
+          maskEdit={maskEdit} onMaskEdit={(on) => { setMaskEdit(on); if (on && tool !== 'eraser') setTool('brush'); }}
           onSelect={setActiveLayerId}
           onAdd={addLineLayer}
           onAddPaint={addPaintLayer}

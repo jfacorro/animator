@@ -21,6 +21,9 @@ export const DEFAULT_ONION: OnionState = { enabled: true, before: 1, after: 1, o
 
 interface Props {
   project: Project;
+  /** Painting the active layer's mask instead of the layer. */
+  maskEdit: boolean;
+  onMaskEdit: (on: boolean) => void;
   frame: number;
   activeLayerId: string;
   onion: OnionState;
@@ -32,7 +35,7 @@ interface Props {
   onMove: (id: string, delta: number) => void;
   /** Drag a layer or group to a spot in the stack. */
   onDrop: (id: string, kind: DragKind, drop: Drop) => void;
-  onUpdate: (id: string, patch: Partial<Pick<Layer, 'name' | 'visible' | 'locked' | 'opacity' | 'blend' | 'clip' | 'alphaLock' | 'everyFrame'>>, record?: boolean) => void;
+  onUpdate: (id: string, patch: Partial<Pick<Layer, 'name' | 'visible' | 'locked' | 'opacity' | 'blend' | 'clip' | 'alphaLock' | 'everyFrame' | 'mask' | 'maskOff'>>, record?: boolean) => void;
   /** The selected group, when a group row was clicked (its settings show below). */
   selectedGroupId: string | null;
   onSelectGroup: (id: string | null) => void;
@@ -162,6 +165,22 @@ export function LayersPanel(props: Props) {
               <input type="checkbox" checked={!!active.alphaLock} onChange={(e) => props.onUpdate(active.id, { alphaLock: e.target.checked })} />
             </label>
           )}
+          {!group && active && !active.reference && (active.mask === undefined ? (
+            <div className="row">
+              Mask
+              <button className="btn small" title="Add a layer mask: paint on it to hide parts of this layer without erasing them, erase to bring them back" onClick={() => { props.onUpdate(active.id, { mask: null, maskOff: false }); props.onMaskEdit(true); }}>Add mask</button>
+            </div>
+          ) : (
+            <div className="row mask-row">
+              <label title="Use the mask. Untick to see the whole layer while keeping the mask.">
+                <input type="checkbox" checked={!active.maskOff} onChange={(e) => props.onUpdate(active.id, { maskOff: !e.target.checked })} /> Mask
+              </label>
+              <span className="mask-actions">
+                <button className={`btn small${props.maskEdit ? ' on' : ''}`} aria-pressed={props.maskEdit} title={props.maskEdit ? 'Back to drawing on the layer' : 'Paint the mask: the brush hides the layer, the eraser shows it again'} onClick={() => props.onMaskEdit(!props.maskEdit)}>{props.maskEdit ? 'Done' : 'Paint mask'}</button>
+                <button className="btn small" title="Delete the mask: the whole layer shows again" onClick={() => { props.onMaskEdit(false); props.onUpdate(active.id, { mask: undefined, maskOff: undefined }); }}>Delete</button>
+              </span>
+            </div>
+          ))}
         </div>
       )}
       <div className="panel-section">

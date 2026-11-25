@@ -555,10 +555,11 @@ export function paintSource(p: Paint): CanvasImageSource | null {
 /** Wait until every paint drawing can be drawn (before exporting, which draws frames straight away). */
 export async function paintReady(project: Project): Promise<void> {
   const waits: Promise<unknown>[] = [];
-  for (const d of Object.values(project.drawings)) {
-    if (!d.paint || paintSource(d.paint)) continue;
-    loadedImage(d.paint.data); // starts decoding
-    const img = images.get(d.paint.data);
+  const paints = [...Object.values(project.drawings).map((d) => d.paint), ...project.layers.map((l) => l.mask)];
+  for (const p of paints) {
+    if (!p || paintSource(p)) continue;
+    loadedImage(p.data); // starts decoding
+    const img = images.get(p.data);
     if (img) waits.push(img.decode().catch(() => undefined));
   }
   await Promise.all(waits);
@@ -676,6 +677,10 @@ export interface ComposeOptions {
   includeHidden?: boolean;
   /** Strokes in progress (with their symmetry copies), drawn into this layer's current drawing. */
   live?: { layerId: string; strokes: Stroke[] } | null;
+  /** Strokes being painted on a layer's mask (hiding, or revealing with the eraser). */
+  liveMask?: { layerId: string; strokes: Stroke[] } | null;
+  /** Show this layer's mask as a red tint (while it's being painted). */
+  showMask?: string | null;
   /** Show reference image layers (on screen only: never in exports). */
   references?: boolean;
   /** Frame the scene through the camera (playback and export). */
@@ -851,8 +856,35 @@ export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, fr
 
   const shown = (l: Layer) => l.visible || !!opts.includeHidden;
 
-  /** The layer's picture at this frame (with any stroke in progress), or null when empty. */
+  /** The layer's mask on a scratch sheet (with any mask stroke in progress), or null when it hides nothing. */
+  const maskSheet = (layer: Layer): CanvasRenderingContext2D | null => {
+    const liveStrokes = opts.liveMask?.layerId === layer.id ? opts.liveMask.strokes : null;
+    if (layer.mask === undefined || (layer.maskOff && !liveStrokes)) return null;
+    const src = layer.mask ? paintSource(layer.mask) : null;
+    if (!src && !liveStrokes?.length) return null;
+    const m = scratch();
+    if (src && layer.mask) m.drawImage(src, layer.mask.x, layer.mask.y);
+    if (liveStrokes) for (const s of liveStrokes) paintStroke(m, s, true);
+    return m;
+  };
+
+  /** The layer's picture with its mask applied. */
   const picture = (layer: Layer): Pic | null => {
+    const img = layerPicture(layer);
+    if (!img || layer.reference) return img;
+    const mark = poolUsed;
+    const m = maskSheet(layer);
+    if (!m) { poolUsed = mark; return img; }
+    const t = scratch();
+    put(t, img);
+    t.globalCompositeOperation = 'destination-out';
+    put(t, sheetOf(m));
+    t.globalCompositeOperation = 'source-over';
+    return sheetOf(t);
+  };
+
+  /** The layer's picture at this frame (with any stroke in progress), or null when empty. */
+  const layerPicture = (layer: Layer): Pic | null => {
     const ref = layer.reference;
     if (ref) {
       const img = opts.references ? loadedImage(ref.data) : null;
@@ -958,7 +990,26 @@ export function composeFrame(ctx: CanvasRenderingContext2D, project: Project, fr
     poolUsed = 0;
   }
   poolUsed = 0;
+  // While a mask is painted, show it as a red tint, like a rubylith.
+  const masked = opts.showMask ? findLayerIn(project, opts.showMask) : null;
+  if (masked) {
+    const m = maskSheet({ ...masked, maskOff: false });
+    if (m) {
+      m.setTransform(1, 0, 0, 1, 0, 0);
+      m.globalCompositeOperation = 'source-in';
+      m.fillStyle = '#e0303a';
+      m.fillRect(0, 0, m.canvas.width, m.canvas.height);
+      ctx.globalAlpha = 0.45;
+      put(ctx, sheetOf(m));
+      ctx.globalAlpha = 1;
+    }
+    poolUsed = 0;
+  }
   ctx.restore();
+}
+
+function findLayerIn(project: Project, id: string): Layer | null {
+  return project.layers.find((l) => l.id === id) ?? null;
 }
 
 /** Liquify on paint: pixels within `radius` of `at` slide along by `delta`, less towards the edge. */

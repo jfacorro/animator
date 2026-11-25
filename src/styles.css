@@ -507,3 +507,7 @@ button.file-status.paused {
 .adjust-body { padding: 16px 20px; }
 .adjust-body .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .adjust-body .link-btn { align-self: flex-start; }
+
+/* Layer mask row */
+.mask-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mask-actions { display: inline-flex; gap: 4px; }

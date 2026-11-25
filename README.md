@@ -84,6 +84,11 @@ you use them in: to move an animation between devices or browsers, use
   group has a blend mode (Multiply for shadows, Screen/Add for light, …), and
   *Clip to layer below* shows a layer only where the layer under it has paint
   (colour and shading inside the lines).
+- **Layer masks.** *Add mask* in a layer's settings, then paint with the
+  brush to hide parts of the layer without erasing them (the mask shows as a
+  red tint while you paint it) and with the eraser to bring them back. Click
+  *Done* to draw on the layer again. A mask covers the whole layer on every
+  frame; untick *Mask* to see the layer without it, or delete it.
 - **Text.** The text tool (T) types on the canvas: click, type, Enter to
   finish (Shift+Enter for a new line, Esc to cancel). Pick the font, size,
   bold and colour first. Text is a stroke like any other, so the Lasso moves

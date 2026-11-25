@@ -104,6 +104,14 @@ export interface Layer {
   everyFrame?: boolean;
   /** Paint layers: new paint only goes where the layer already has paint (Procreate's alpha lock). */
   alphaLock?: boolean;
+  /**
+   * Layer mask: where it has paint, the layer is hidden (fully where the mask is
+   * solid, partly where it's soft). One mask for the whole layer, on every frame.
+   * `null` is a mask with nothing painted on it yet.
+   */
+  mask?: Paint | null;
+  /** The mask is kept but not used. */
+  maskOff?: boolean;
 }
 
 export type BlendMode =
