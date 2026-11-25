@@ -44,7 +44,11 @@ you use them in: to move an animation between devices or browsers, use
   crosses itself, while overlapping strokes build up. The stabilizer makes the
   line trail the pointer (shown by an orange string) and catches up when you
   let go. The palette and your last brush are kept in the browser: **+** adds
-  the current colour, right-click a swatch to remove it.
+  the current colour, right-click a swatch to remove it. The rainbow button
+  opens the **colour disc**: drag around the ring for the hue and in the
+  square for how strong and bright it is, or type a hex code. Below it are
+  colours that go with the current one (complementary, split complementary,
+  analogous, triadic or tetradic) and the colours you picked lately.
   **Graphite** and **Chalk** are textured: paper grain shows through the
   line. **Edit…** opens the brush editor with every setting, a live preview
   and the grain (Pencil, Chalk or Canvas, and how much shows); name the brush

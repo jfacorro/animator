@@ -21,6 +21,8 @@ import { readAudioFile, useAudioPlayback } from './audio';
 import { matchingPreset, PRESETS, validBrush, type BrushPreset } from './model/brushes';
 import { BrushEditor } from './components/BrushEditor';
 import { BrushSample } from './components/BrushSample';
+import { ColourPicker } from './components/ColourPicker';
+import { HARMONIES, remember, type Harmony } from './model/colour';
 import {
   canSaveToFile, filePermission, loadCurrentProject, loadLinkedFile, pickOpenFile, pickSaveFile, readProjectFile, rememberLinkedFile,
   saveCurrentProject, saveProjectFile, writeProjectFile, type LinkedFile,
@@ -48,6 +50,8 @@ const KEYS_KEY = 'animator:keys';
 
 const DEFAULT_PALETTE = ['#1a1a1a', '#6b6f78', '#e5534b', '#f08a3a', '#f2c94c', '#6faf6a', '#5b8fd9', '#9b6fd6', '#ffffff'];
 const PALETTE_KEY = 'animator:palette';
+const RECENT_KEY = 'animator:recent-colours';
+const HARMONY_KEY = 'animator:harmony';
 const BRUSH_KEY = 'animator:brush';
 const BRUSHES_KEY = 'animator:brushes';
 const ONION_KEY = 'animator:onion';
@@ -140,6 +144,17 @@ export default function App() {
   const [palette, setPalette] = useState<string[]>(() => loadPref(PALETTE_KEY, DEFAULT_PALETTE, (v) => Array.isArray(v) && v.length > 0 && v.every(isHex)));
   useEffect(() => { savePref(BRUSH_KEY, brush); }, [brush]);
   useEffect(() => { savePref(PALETTE_KEY, palette); }, [palette]);
+  /** Colour disc: where it opens, the harmony shown, and the colours picked lately. */
+  const [picker, setPicker] = useState<{ x: number; y: number } | null>(null);
+  const [harmonyKind, setHarmonyKind] = useState<Harmony>(() => loadPref(HARMONY_KEY, 'complementary' as Harmony, (v) => HARMONIES.some((h) => h.id === v)));
+  useEffect(() => { savePref(HARMONY_KEY, harmonyKind); }, [harmonyKind]);
+  const [recentColours, setRecentColours] = useState<string[]>(() => loadPref(RECENT_KEY, [] as string[], (v) => Array.isArray(v) && v.every(isHex)));
+  useEffect(() => { savePref(RECENT_KEY, recentColours); }, [recentColours]);
+  // A colour joins the recent ones once it has been kept for a moment (not every step of a drag on the disc).
+  useEffect(() => {
+    const t = window.setTimeout(() => setRecentColours((r) => (r[0] === brush.color.toLowerCase() ? r : remember(r, brush.color))), 700);
+    return () => window.clearTimeout(t);
+  }, [brush.color]);
   /** Brushes the user saved in the brush editor. */
   const [savedBrushes, setSavedBrushes] = useState<BrushPreset[]>(() => {
     const list = loadPref<unknown[]>(BRUSHES_KEY, [], Array.isArray);
@@ -967,7 +982,11 @@ export default function App() {
                 onContextMenu={(e) => { e.preventDefault(); if (!holdSwatch.justFired()) setPalette((p) => (p.length > 1 ? p.filter((x) => x !== c) : p)); }}
               />
             ))}
-            <input className="color-input" type="color" aria-label="Custom colour" title="Pick any colour" value={brush.color} onChange={(e) => setBrush((b) => ({ ...b, color: e.target.value }))} />
+            <button
+              className="color-input colour-toggle" aria-label="Colour disc" aria-expanded={!!picker} title="Colour disc: pick any colour, see harmonies and recent colours"
+              style={{ background: `conic-gradient(red, yellow, lime, cyan, blue, magenta, red)` }}
+              onClick={(e) => { if (picker) { setPicker(null); return; } const r = e.currentTarget.getBoundingClientRect(); setPicker({ x: r.right + 10, y: r.top - 120 }); }}
+            />
             <button
               className="icon-btn sm" aria-label="Add colour to palette" disabled={palette.includes(brush.color.toLowerCase()) || palette.length >= MAX_PALETTE}
               title={palette.includes(brush.color.toLowerCase()) ? 'This colour is already in the palette' : 'Save the current colour in the palette. The palette is kept in this browser for all your animations.'}
@@ -1054,6 +1073,14 @@ export default function App() {
 
       {toast && <div className="toast" role="status">{toast}</div>}
       {shortcutsOpen && <ShortcutsDialog keymap={keymap} onChange={setKeymap} onClose={() => setShortcutsOpen(false)} />}
+      {picker && (
+        <div className="colour-popover" style={{ left: Math.max(8, Math.min(picker.x, window.innerWidth - 248)), top: Math.max(8, Math.min(picker.y, window.innerHeight - 470)) }}>
+          <ColourPicker
+            color={brush.color} onChange={(c) => setBrush((b) => ({ ...b, color: c }))} recent={recentColours}
+            harmonyKind={harmonyKind} onHarmonyChange={setHarmonyKind} onClose={() => setPicker(null)}
+          />
+        </div>
+      )}
       {brushEditor && (
         <BrushEditor
           brush={brush} saved={savedBrushes} onSave={setSavedBrushes}
