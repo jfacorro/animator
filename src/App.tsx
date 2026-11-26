@@ -802,19 +802,19 @@ export default function App() {
           <button className="icon-btn" aria-label="More" title="More: sound, reference image, PSD, shortcuts and touch settings" aria-expanded={menuOpen} onClick={() => setMenuOpen((m) => !m)}><I.More /></button>
           {menuOpen && (
             <div className="menu-list" onMouseLeave={() => { if (document.activeElement?.tagName !== 'SELECT') setMenuOpen(false); }}>
-              <button onClick={() => { setMenuOpen(false); audioInput.current?.click(); }} title="Add a sound (MP3, WAV…) to time the animation to, for example dialogue for lip-sync. It's saved inside the animation.">{project.audio ? 'Replace sound…' : 'Add sound…'}</button>
-              <button onClick={() => { setMenuOpen(false); imageInput.current?.click(); }} title="Add a picture to trace over, as a see-through layer. It shows on every frame and is never exported.">Add reference image…</button>
-              <button onClick={() => { setMenuOpen(false); setShortcutsOpen(true); }} title="See and change the keyboard shortcuts (?)">Keyboard shortcuts…</button>
+              <button onClick={() => { setMenuOpen(false); audioInput.current?.click(); }} title="Add a sound (MP3, WAV…) to time the animation to, for example dialogue for lip-sync. It's saved inside the animation."><I.Sound />{project.audio ? 'Replace sound…' : 'Add sound…'}</button>
+              <button onClick={() => { setMenuOpen(false); imageInput.current?.click(); }} title="Add a picture to trace over, as a see-through layer. It shows on every frame and is never exported."><I.Image />Add reference image…</button>
+              <button onClick={() => { setMenuOpen(false); setShortcutsOpen(true); }} title="See and change the keyboard shortcuts (?)"><I.Keyboard />Keyboard shortcuts…</button>
               <label className="menu-row" title="For iPad and touch screens. With a pencil, a finger moves and zooms the canvas so a resting hand doesn't draw. Two-finger tap undoes, three-finger tap redoes.">
-                Fingers
+                <span className="menu-label"><I.Hand />Fingers</span>
                 <select value={fingers} onChange={(e) => setFingers(e.target.value as Fingers)}>
                   <option value="auto">{penSeen ? 'Auto (move the canvas)' : 'Auto (draw until a pencil is used)'}</option>
                   <option value="draw">Draw</option>
                   <option value="navigate">Move the canvas</option>
                 </select>
               </label>
-              <button onClick={() => { setMenuOpen(false); psdInput.current?.click(); }} title="Open a Photoshop file (PSD, also from Procreate) as a new animation: each of its layers becomes a paint layer">Open PSD…</button>
-              {fileLinked && <button onClick={() => { setMenuOpen(false); linkFile(null, null); }} title="Keep the file as it is now and stop saving changes to it">Stop auto-saving to {fileLinked.handle.name}</button>}
+              <button onClick={() => { setMenuOpen(false); psdInput.current?.click(); }} title="Open a Photoshop file (PSD, also from Procreate) as a new animation: each of its layers becomes a paint layer"><I.Layers />Open PSD…</button>
+              {fileLinked && <button onClick={() => { setMenuOpen(false); linkFile(null, null); }} title="Keep the file as it is now and stop saving changes to it"><I.Unlink />Stop auto-saving to {fileLinked.handle.name}</button>}
             </div>
           )}
           <input
