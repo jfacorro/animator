@@ -48,7 +48,7 @@ export function BrushEditor({ brush, onChange, saved, onSave, onClose }: Props) 
       ...(brush.softness > 0 ? { softness: brush.softness } : {}),
       ...(brush.grain !== 'none' && brush.grainAmount > 0 ? { grain: { kind: brush.grain, amount: brush.grainAmount } } : {}),
     };
-    paintStroke(ctx, s, true);
+    paintStroke(ctx, s);
   }, [brush]);
 
   const slider = (label: string, help: string, key: 'opacity' | 'smoothing' | 'stabilizer' | 'thinning' | 'softness' | 'grainAmount', disabled = false) => (

@@ -36,7 +36,7 @@ export const BrushSample = memo(function BrushSample({ brush }: { brush: BrushPr
       ...(brush.softness > 0 ? { softness: brush.softness } : {}),
       ...(brush.grain && brush.grain !== 'none' && (brush.grainAmount ?? 0) > 0 ? { grain: { kind: brush.grain, amount: brush.grainAmount! } } : {}),
     };
-    paintStroke(ctx, s, true);
+    paintStroke(ctx, s);
   }, [brush]);
   return <canvas ref={canvas} className="brush-sample" style={{ width: W, height: H }} aria-hidden="true" />;
 });
