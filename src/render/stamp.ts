@@ -28,6 +28,9 @@ const STYLE: Record<GrainKind, { spacing: number; scatter: number; sizeJitter: n
   canvas: { spacing: 0.08, scatter: 0.04, sizeJitter: 0.05 },
 };
 
+/** More dabs than any real stroke needs: a guard against runaway strokes. */
+const MAX_DABS = 200_000;
+
 /** A repeatable pseudo-random number in [0, 1) for dab `i`, so a stroke looks the same every time it's drawn. */
 function rand(i: number, k: number): number {
   const x = Math.sin(i * 12.9898 + k * 78.233) * 43758.5453;
@@ -77,7 +80,8 @@ export function strokeDabs(s: Stroke, last = true): Dab[] {
       const t = d / len;
       const p = pressure[i - 1] + (pressure[i] - pressure[i - 1]) * Math.min(1, t);
       const step = Math.max(0.35, radius(p) * 2 * style.spacing);
-      if (d + step > len) { carry = d + step - len; break; }
+      // Written so a bad number (NaN) ends the walk instead of looping forever.
+      if (!(d + step <= len) || dabs.length > MAX_DABS) { carry = Math.min(step, Math.max(0, d + step - len)) || 0; break; }
       d += step;
       const u = d / len;
       add(x0 + (x1 - x0) * u, y0 + (y1 - y0) * u, pressure[i - 1] + (pressure[i] - pressure[i - 1]) * u);
@@ -162,6 +166,7 @@ function compile(gl: WebGL2RenderingContext, type: number, src: string): WebGLSh
 }
 
 function setup(): GL | null {
+  if (state && state.gl.isContextLost()) state = null;
   if (state) return state;
   if (unavailable || typeof document === 'undefined') return null;
   try {
@@ -273,6 +278,18 @@ function rgb(color: string): [number, number, number] {
  */
 export function paintStamped(ctx: CanvasRenderingContext2D, s: Stroke, live: boolean, grainTile: HTMLCanvasElement, grainScale: number): boolean {
   if (!s.grain || (s.kind ?? 'free') !== 'free') return false;
+  try {
+    return stamp(ctx, s as Stroke & { grain: NonNullable<Stroke['grain']> }, live, grainTile, grainScale);
+  } catch (e) {
+    // Anything going wrong on the GPU: stop using it, and let the caller draw the stroke its own way.
+    console.error('Textured brush: GPU drawing failed, using the canvas instead.', e);
+    unavailable = true;
+    state = null;
+    return false;
+  }
+}
+
+function stamp(ctx: CanvasRenderingContext2D, s: Stroke & { grain: NonNullable<Stroke['grain']> }, live: boolean, grainTile: HTMLCanvasElement, grainScale: number): boolean {
   const g = setup();
   if (!g) return false;
   const dabs = strokeDabs(s, !live);
@@ -332,6 +349,7 @@ export function paintStamped(ctx: CanvasRenderingContext2D, s: Stroke, live: boo
   gl.blendEquation(gl.MAX);
   gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, dabs.length);
   gl.bindVertexArray(null);
+  if (gl.isContextLost()) { state = null; return false; }
 
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
