@@ -91,6 +91,8 @@ interface Props {
   onUndo: () => void;
   /** Three-finger tap. */
   onRedo: () => void;
+  /** Ctrl + mouse wheel: one step bigger or smaller for the current tool's size. False if the tool has no size. */
+  onBrushSize?: (bigger: boolean) => boolean;
 }
 
 const RULER = 20; // ruler thickness, screen px
@@ -153,7 +155,7 @@ function outlineBox(pts: Vec[]): Box {
 /** Drawing outside the frame is shown through this, so the frame's edge stays clear. */
 const OUTSIDE_FRAME = 'rgba(42, 44, 49, 0.72)';
 
-export function Stage({ project, frame, activeLayerId, tool, brush, onion, selection, onSelectionChange, paintSelection, onPaintSelectionChange, warp, maskEdit = false, onCommit, onPickColor, panKey, onPanned, playing, keymap, symmetry, rulers, onRulersChange, touchDraws, onUndo, onRedo }: Props) {
+export function Stage({ project, frame, activeLayerId, tool, brush, onion, selection, onSelectionChange, paintSelection, onPaintSelectionChange, warp, maskEdit = false, onCommit, onPickColor, panKey, onPanned, playing, keymap, symmetry, rulers, onRulersChange, touchDraws, onUndo, onRedo, onBrushSize }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gestureRef = useRef<Gesture | null>(null);
@@ -389,12 +391,19 @@ export function Stage({ project, frame, activeLayerId, tool, brush, onion, selec
   useEffect(() => { setView(FIT_VIEW); }, [project.id]);
 
   // Wheel: zoom around the pointer. Sideways scrolling (trackpads) or Shift+wheel pans.
+  // Ctrl + mouse wheel changes the brush size instead. A trackpad pinch also arrives as a
+  // wheel event with Ctrl held, but in small steps, so pinching still zooms.
+  const brushSizeRef = useRef(onBrushSize);
+  brushSizeRef.current = onBrushSize;
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const line = e.deltaMode === 1 ? 33 : 1;
+      const mouseNotch = e.deltaMode !== 0 || (Number.isInteger(e.deltaY) && Math.abs(e.deltaY) >= 50);
+      // One wheel notch is one size step. Tools without a size keep zooming.
+      if ((e.ctrlKey || e.metaKey) && e.deltaY !== 0 && mouseNotch && brushSizeRef.current?.(e.deltaY < 0)) return;
       if (!e.ctrlKey && !e.metaKey && (e.deltaX !== 0 || e.shiftKey)) {
         const dx = (e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX) * line;
         const dy = e.shiftKey ? 0 : e.deltaY * line;
