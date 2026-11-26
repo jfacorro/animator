@@ -1,4 +1,5 @@
 import { getStroke } from 'perfect-freehand';
+import { paintStamped } from './stamp';
 import { cameraAt, cameraMatrix, hasCamera } from '../model/camera';
 import { compositeOp, sceneUnits } from '../model/groups';
 import { celIndexAt, isBlank, type Drawing, type FontId, type GrainKind, type Layer, type Paint, type Project, type Stroke } from '../model/project';
@@ -193,7 +194,8 @@ export function paintStroke(ctx: CanvasRenderingContext2D, s: Stroke, live = fal
     return;
   }
   if (s.grain && s.grain.amount > 0 && !s.erase && kind !== 'fill') {
-    paintGrainy(ctx, s, live);
+    // Freehand lines are stamped on the GPU; shapes, and browsers without WebGL 2, use the canvas.
+    if (!paintStamped(ctx, s, live, grainTile(s.grain.kind), Math.max(0.5, s.size / 24))) paintGrainy(ctx, s, live);
     return;
   }
   const path = strokePath(s, live);
