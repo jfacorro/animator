@@ -225,6 +225,7 @@ export function paintStroke(ctx: CanvasRenderingContext2D, s: Stroke, live = fal
 // Textured brushes: the stroke is painted on its own, then a grain pattern is
 // knocked out of it, and the result laid down like any other stroke.
 let grainSheet: HTMLCanvasElement | null = null;
+let grainMask: HTMLCanvasElement | null = null;
 const grainTiles = new Map<GrainKind, HTMLCanvasElement>();
 
 /** A repeating 256 px tile of grain: where it's dark, paint is taken away. */
@@ -298,21 +299,45 @@ function paintGrainy(ctx: CanvasRenderingContext2D, s: Stroke, live: boolean) {
   g.globalCompositeOperation = 'source-over';
   g.clearRect(bx, by, bw, bh);
   g.setTransform(t);
-  paintStroke(g, { ...s, grain: undefined, opacity: undefined, atop: undefined }, live);
-  // The grain is anchored to the page, so it stays put under the brush like paper does.
-  g.globalCompositeOperation = 'destination-out';
-  g.globalAlpha = Math.min(1, s.grain!.amount);
-  const pattern = g.createPattern(grainTile(s.grain!.kind), 'repeat');
+  // The stroke with a soft edge: its coverage fades out over a band, which the grain then breaks up.
+  const soft = Math.max(s.softness ?? 0, 0.3);
+  paintStroke(g, { ...s, grain: undefined, opacity: undefined, atop: undefined, softness: soft }, live);
+  // The grain, anchored to the page so it stays put under the brush like paper does.
+  if (!grainMask) grainMask = makeCanvas(width, height);
+  if (grainMask.width < width || grainMask.height < height) {
+    grainMask.width = Math.max(grainMask.width, width);
+    grainMask.height = Math.max(grainMask.height, height);
+  }
+  const gm = grainMask.getContext('2d', { willReadFrequently: true })!;
+  gm.setTransform(1, 0, 0, 1, 0, 0);
+  gm.clearRect(bx, by, bw, bh);
+  const pattern = gm.createPattern(grainTile(s.grain!.kind), 'repeat');
   if (pattern) {
     const scale = Math.max(0.5, s.size / 24);
     pattern.setTransform(new DOMMatrix([scale, 0, 0, scale, 0, 0]));
-    g.fillStyle = pattern;
+    gm.setTransform(t);
+    gm.fillStyle = pattern;
     // Cover the stroke's area in page units.
     const inv = t.inverse();
     const corners = [[bx, by], [bx + bw, by], [bx, by + bh], [bx + bw, by + bh]].map(([x, y]) => [inv.a * x + inv.c * y + inv.e, inv.b * x + inv.d * y + inv.f]);
     const xs = corners.map((c) => c[0]), ys = corners.map((c) => c[1]);
-    g.fillRect(Math.min(...xs), Math.min(...ys), Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+    gm.fillRect(Math.min(...xs), Math.min(...ys), Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
   }
+  // Paint catches on the paper's high points: where the stroke's coverage is below the grain there,
+  // nothing sticks. Inside the stroke that leaves specks; along the edge it gives a broken, dry border.
+  const amount = Math.min(1, s.grain!.amount);
+  const paint = g.getImageData(bx, by, bw, bh);
+  const grain = gm.getImageData(bx, by, bw, bh).data;
+  const px = paint.data;
+  for (let i = 3; i < px.length; i += 4) {
+    const a = px[i] / 255;
+    if (a === 0) continue;
+    const k = (grain[i] / 255) * amount;
+    const v = (a - k * 0.9) * 1.2;
+    px[i] = v <= 0 ? 0 : v >= 1 ? 255 : v * 255;
+  }
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.putImageData(paint, bx, by);
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (s.opacity !== undefined && s.opacity < 1) ctx.globalAlpha *= s.opacity;
