@@ -750,6 +750,11 @@ export default function App() {
           onChange={(e) => apply((p) => ({ ...p, name: e.target.value }), false)}
           onBlur={(e) => apply((p) => ({ ...p, name: e.target.value.trim() || 'Untitled animation' }))}
         />
+        <div className="bar-group" role="group" aria-label="File">
+          <button className="icon-btn" aria-label="New animation" title="New animation: start a blank one, replacing the current one" onClick={newProject}><I.FileNew /></button>
+          <button className="icon-btn" aria-label="Open from file" title={canSaveToFile() ? 'Open an animation file. Changes then save back to it automatically.' : 'Open an animation saved with Save to file'} onClick={openProject}><I.Folder /></button>
+          <button className="icon-btn" aria-label={canSaveToFile() && fileLinked ? 'Save as' : 'Save to file'} title={!canSaveToFile() ? 'Download this animation as a file you can back up or open later. It also saves automatically in this browser.' : fileLinked ? 'Save as: save a copy to another file, and auto-save there from now on' : 'Save to file: choose where to save this animation. After that, every change saves to it automatically.'} onClick={saveAs}><I.Save /></button>
+        </div>
         {fileLinked && (() => {
           const name = fileLinked.handle.name;
           const icon = fileStatus === 'saving' ? <I.Spinner /> : fileStatus === 'error' ? <I.Warning /> : fileStatus === 'paused' ? <I.PauseSmall /> : <I.Check />;
@@ -774,7 +779,7 @@ export default function App() {
           <button className="icon-btn" aria-label="Next frame" title="Next frame (→)" onClick={() => goTo(frame + 1)}><I.Next /></button>
           <button className="icon-btn" aria-label="Last frame" title="Last frame (End)" onClick={() => goTo(length - 1)}><I.Last /></button>
           <span className="frame-count">Frame <strong>{frame + 1}</strong> <span className="muted">/ {length}</span></span>
-          <label className="muted" style={{ display: 'flex', alignItems: 'center', gap: 6 }} title="Playback speed in frames per second. 12 fps is common for hand-drawn animation.">Speed
+          <label className="muted" style={{ display: 'flex', alignItems: 'center', gap: 6 }} title="Playback speed in frames per second. 12 fps is common for hand-drawn animation."><span className="wide-only">Speed</span>
             <select value={project.fps} onChange={(e) => apply((p) => ({ ...p, fps: Number(e.target.value) }))}>
               {[6, 8, 12, 15, 24].map((f) => <option key={f} value={f}>{f} fps</option>)}
             </select>
@@ -784,20 +789,21 @@ export default function App() {
           </select>
         </div>
         <div className="spacer" />
-        <button className={`btn${onion.enabled ? ' on' : ''}`} aria-pressed={onion.enabled} title="Show the previous and next drawings faintly while you draw (O). Set how many, their colours and strength in the Layers panel." onClick={() => setOnion((o) => ({ ...o, enabled: !o.enabled }))}>
+        <div className="bar-group" role="group" aria-label="Extras">
+          <button className={`icon-btn${refWindow ? ' on' : ''}`} aria-pressed={refWindow} aria-label="Reference window" title="Reference window: a small window over the canvas showing the whole frame as it will look, or a picture to look at while you draw" onClick={() => setRefWindow((v) => !v)}><I.PictureInPicture /></button>
+          <button className="icon-btn" aria-label="Adjust colours" title="Adjust colours: hue, saturation and brightness, or recolour one colour, for the current drawing or the whole layer" onClick={() => { setPlaying(false); setAdjusting(true); }}><I.Adjust /></button>
+          <button className="icon-btn" aria-label="Timelapse" title="Timelapse: replay how this animation was drawn, and save it as a video" onClick={() => { setPlaying(false); setTimelapse(true); }}><I.Timelapse /></button>
+        </div>
+        <button className={`btn${onion.enabled ? ' on' : ''}`} aria-pressed={onion.enabled} aria-label="Onion skin" title="Show the previous and next drawings faintly while you draw (O). Set how many, their colours and strength in the Layers panel." onClick={() => setOnion((o) => ({ ...o, enabled: !o.enabled }))}>
           <span className="onion-dots"><i style={{ background: onion.beforeColor }} /><i style={{ background: onion.afterColor }} /></span>
-          Onion skin
+          <span className="wide-only">Onion skin</span>
         </button>
         <div className="menu">
-          <button className="icon-btn" aria-label="File menu" title="New, open and save animations" aria-expanded={menuOpen} onClick={() => setMenuOpen((m) => !m)}><I.More /></button>
+          <button className="icon-btn" aria-label="More" title="More: sound, reference image, PSD, shortcuts and touch settings" aria-expanded={menuOpen} onClick={() => setMenuOpen((m) => !m)}><I.More /></button>
           {menuOpen && (
             <div className="menu-list" onMouseLeave={() => { if (document.activeElement?.tagName !== 'SELECT') setMenuOpen(false); }}>
-              <button onClick={newProject} title="Start a blank animation, replacing the current one">New animation</button>
               <button onClick={() => { setMenuOpen(false); audioInput.current?.click(); }} title="Add a sound (MP3, WAV…) to time the animation to, for example dialogue for lip-sync. It's saved inside the animation.">{project.audio ? 'Replace sound…' : 'Add sound…'}</button>
               <button onClick={() => { setMenuOpen(false); imageInput.current?.click(); }} title="Add a picture to trace over, as a see-through layer. It shows on every frame and is never exported.">Add reference image…</button>
-              <button onClick={() => { setMenuOpen(false); setPlaying(false); setTimelapse(true); }} title="Replay how this animation was drawn, and save it as a video">Timelapse…</button>
-              <button onClick={() => { setMenuOpen(false); setRefWindow((v) => !v); }} title="A small window that floats over the canvas: the whole frame as it will look, or a picture to look at while you draw">{refWindow ? 'Hide reference window' : 'Reference window'}</button>
-              <button onClick={() => { setMenuOpen(false); setPlaying(false); setAdjusting(true); }} title="Hue, saturation and brightness, or Recolour one colour, for the current drawing or the whole layer">Adjust colours…</button>
               <button onClick={() => { setMenuOpen(false); setShortcutsOpen(true); }} title="See and change the keyboard shortcuts (?)">Keyboard shortcuts…</button>
               <label className="menu-row" title="For iPad and touch screens. With a pencil, a finger moves and zooms the canvas so a resting hand doesn't draw. Two-finger tap undoes, three-finger tap redoes.">
                 Fingers
@@ -808,15 +814,7 @@ export default function App() {
                 </select>
               </label>
               <button onClick={() => { setMenuOpen(false); psdInput.current?.click(); }} title="Open a Photoshop file (PSD, also from Procreate) as a new animation: each of its layers becomes a paint layer">Open PSD…</button>
-              <button onClick={openProject} title={canSaveToFile() ? 'Open an animation file. Changes then save back to it automatically.' : 'Open an animation saved with Save to file'}>Open from file…</button>
-              {canSaveToFile() ? (
-                <>
-                  <button onClick={saveAs} title="Choose where to save this animation. After that, every change saves to that file automatically.">{fileLinked ? 'Save as…' : 'Save to file…'}</button>
-                  {fileLinked && <button onClick={() => { setMenuOpen(false); linkFile(null, null); }} title="Keep the file as it is now and stop saving changes to it">Stop auto-saving to {fileLinked.handle.name}</button>}
-                </>
-              ) : (
-                <button onClick={saveAs} title="Download this animation as a file you can back up or open later. It also saves automatically in this browser. (Auto-saving to a file needs Chrome or Edge.)">Save to file</button>
-              )}
+              {fileLinked && <button onClick={() => { setMenuOpen(false); linkFile(null, null); }} title="Keep the file as it is now and stop saving changes to it">Stop auto-saving to {fileLinked.handle.name}</button>}
             </div>
           )}
           <input

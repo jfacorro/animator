@@ -75,6 +75,9 @@ input[type='checkbox'] { accent-color: var(--accent); }
 .project-name { width: 200px; background: transparent; border: 1px solid transparent; font-weight: 500; }
 .project-name:hover, .project-name:focus { border-color: var(--border-2); background: var(--control); }
 .transport { display: flex; align-items: center; gap: 2px; }
+.bar-group { display: flex; align-items: center; gap: 2px; }
+@media (max-width: 1500px) { .topbar { gap: 8px; } .brand-name { display: none; } .project-name { width: 160px; } }
+@media (max-width: 1300px) { .wide-only { display: none; } .project-name { width: 130px; } .frame-count { min-width: 0; } }
 .frame-count { margin: 0 8px; font-variant-numeric: tabular-nums; min-width: 92px; }
 .muted { color: var(--muted); }
 .spacer { flex: 1; }
@@ -83,7 +86,7 @@ input[type='checkbox'] { accent-color: var(--accent); }
 .onion-dots i + i { margin-left: -3px; }
 .menu { position: relative; }
 .menu-list {
-  position: absolute; right: 0; top: 38px; z-index: 20; min-width: 190px; background: var(--panel); border: 1px solid var(--border-2);
+  position: absolute; right: 0; top: 38px; z-index: 40; min-width: 190px; background: var(--panel); border: 1px solid var(--border-2);
   border-radius: 10px; padding: 6px; display: flex; flex-direction: column; box-shadow: 0 12px 32px #0008;
 }
 .menu-list button { text-align: left; border: none; background: transparent; padding: 8px 10px; border-radius: 6px; }

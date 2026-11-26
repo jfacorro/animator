@@ -63,3 +63,8 @@ export const Check = () => <Icon size={14}><path d="M5 12.5l4.5 4.5L19 7.5" /></
 export const Warning = () => <Icon size={14}><path d="M12 4l9 16H3z" /><path d="M12 10v4M12 17h.01" /></Icon>;
 export const PauseSmall = () => <Icon size={14}><path d="M9 6v12M15 6v12" /></Icon>;
 export const Spinner = () => <Icon size={14}><path d="M12 3a9 9 0 1 0 9 9" /></Icon>;
+export const FileNew = () => <Icon><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5M12 11v6M9 14h6" /></Icon>;
+export const Save = () => <Icon><path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" /><path d="M7 3v5h8V3M7 21v-7h10v7" /></Icon>;
+export const PictureInPicture = () => <Icon><rect x="3" y="5" width="18" height="14" rx="2" /><rect x="12" y="11" width="6" height="5" rx="1" /></Icon>;
+export const Timelapse = () => <Icon><circle cx="12" cy="13" r="8" /><path d="M12 9v4l3 2M10 2h4" /></Icon>;
+export const Adjust = () => <Icon><circle cx="12" cy="12" r="9" /><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" /></Icon>;
