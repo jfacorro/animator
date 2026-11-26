@@ -98,11 +98,18 @@ uniform vec2 area;
 out vec2 uv;
 out vec2 page;
 out float vFlow;
+out float vGrain;
 void main() {
   float c = cos(dab.w), s = sin(dab.w);
-  page = dab.xy + vec2(c * corner.x - s * corner.y, s * corner.x + c * corner.y) * dab.z;
+  // The dab's radius on screen. Tiny dabs are kept at least a pixel wide, and the grain
+  // bites less into them: otherwise a thin, fast line breaks up until nothing is left.
+  float scale = sqrt(abs(toDevice[0][0] * toDevice[1][1] - toDevice[0][1] * toDevice[1][0]));
+  float px = dab.z * scale;
+  float r = max(px, 1.0) / scale;
+  page = dab.xy + vec2(c * corner.x - s * corner.y, s * corner.x + c * corner.y) * r;
   uv = corner;
-  vFlow = flow;
+  vFlow = flow * min(1.0, 0.6 + 0.4 * px);
+  vGrain = smoothstep(1.0, 5.0, px);
   vec2 dev = (toDevice * vec3(page, 1.0)).xy;
   vec2 clip = (dev - origin) / area * 2.0 - 1.0;
   gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
@@ -113,6 +120,7 @@ precision highp float;
 in vec2 uv;
 in vec2 page;
 in float vFlow;
+in float vGrain;
 uniform sampler2D tip;
 uniform sampler2D grain;
 uniform float grainSize;
@@ -125,7 +133,8 @@ void main() {
   if (d > 1.0) discard;
   float a = texture(tip, uv * 0.5 + 0.5).a * vFlow * (1.0 - smoothstep(1.0 - soft, 1.0, d));
   float g = texture(grain, page / grainSize).a;
-  float v = clamp((a - g * amount * 0.8) * 1.4, 0.0, 1.0);
+  float k = amount * (0.25 + 0.75 * vGrain);
+  float v = clamp((a - g * k * 0.8) * (1.0 + 0.4 * vGrain), 0.0, 1.0);
   outColor = vec4(color, v);
 }`;
 
