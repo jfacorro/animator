@@ -45,6 +45,8 @@ interface Props {
   onMoveLayerTo: (layerId: string, gap: number, group: string | null) => void;
   onAddLayer: () => void;
   onAddPaintLayer: () => void;
+  /** Delete the selected layer; undefined when it's the last one that can be drawn on. */
+  onRemoveLayer?: () => void;
 }
 
 interface Press {
@@ -216,6 +218,7 @@ export function Timeline(props: Props) {
         <div className="group">
           <button className="btn small" disabled={playing} title="Add a line layer above the selected one. Every line stays editable with the Lasso." onClick={props.onAddLayer}><I.Plus /> Layer</button>
           <button className="btn small" disabled={playing} title="Add a paint layer above the selected one: what you draw on it becomes pixels, like in a paint app" onClick={props.onAddPaintLayer}><I.PaintLayer /> Paint layer</button>
+          <button className="btn small" disabled={playing || !props.onRemoveLayer} title="Delete the selected layer (Undo brings it back)" onClick={props.onRemoveLayer}><I.Trash /> Delete layer</button>
         </div>
         <span>{active?.reference ? 'Reference image: shows on every frame' : cel ? (cel.drawingId ? 'Drawing holds for' : 'Blank holds for') : 'No drawing here yet'}</span>
         <div className="group">

@@ -1145,6 +1145,7 @@ export default function App() {
         onMoveLayerTo={(id, gap, group) => apply((p) => P.moveLayerToGap(p, id, gap, group))}
         onAddLayer={addLineLayer}
         onAddPaintLayer={addPaintLayer}
+        onRemoveLayer={project.layers.some((l) => l.id !== activeLayerId && !l.reference) ? () => apply((p) => P.removeLayer(p, activeLayerId)) : undefined}
       /></div>}
 
       {toast && <div className="toast" role="status">{toast}</div>}
