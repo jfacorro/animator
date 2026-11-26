@@ -866,7 +866,7 @@ export default function App() {
           </div>
         )}
         {(tool === 'brush' || tool === 'eraser' || tool === 'line' || tool === 'rect' || tool === 'ellipse') && !(brush.fillShapes && (tool === 'rect' || tool === 'ellipse')) && (
-          <label title={isEraser ? 'Width of the eraser in pixels ([ and ] to change)' : 'Width of the line in pixels ([ and ] to change)'}>Size
+          <label title={isEraser ? 'Width of the eraser in pixels ([ and ], or Ctrl + mouse wheel, to change)' : 'Width of the line in pixels ([ and ], or Ctrl + mouse wheel, to change)'}>Size
             <input
               type="range" min={1} max={isEraser ? 120 : 60} value={size}
               onChange={(e) => setBrush((b) => (isEraser ? { ...b, eraserSize: Number(e.target.value) } : { ...b, size: Number(e.target.value) }))}
@@ -1078,6 +1078,12 @@ export default function App() {
           panKey={spaceHeld} onPanned={() => { spacePanned.current = true; }} playing={playing}
           keymap={keymap} symmetry={aids.symmetry} rulers={aids.rulers} onRulersChange={(rulers) => setAids((a) => ({ ...a, rulers }))}
           touchDraws={touchDraws} onUndo={() => setHistory(undo)} onRedo={() => setHistory(redo)}
+          onBrushSize={(bigger) => {
+            const sz = SIZED[tool];
+            if (!sz) return false;
+            setBrush((b) => ({ ...b, [sz.key]: stepSize(b[sz.key] ?? sz.min, sz, bigger) }));
+            return true;
+          }}
           onPickColor={(color) => {
             setBrush((b) => ({ ...b, color }));
             if (tool === 'eyedropper') setTool('brush');
