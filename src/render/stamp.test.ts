@@ -42,3 +42,16 @@ describe('strokeDabs', () => {
     for (const d of dabs) expect(Math.hypot(d.x - 5, d.y - 5)).toBeLessThan(3);
   });
 });
+
+describe('dab spacing on densely sampled lines', () => {
+  it('keeps dabs evenly spaced when the points are closer together than the spacing', async () => {
+    const { strokeDabs } = await import('./stamp');
+    // A straight line sampled every 0.5 px, like a shape the line tool snapped to.
+    const points = Array.from({ length: 401 }, (_, i) => [i * 0.5, 0, 0.5] as [number, number, number]);
+    const dabs = strokeDabs({ kind: 'free', points, color: '#000', size: 20, erase: false, smoothing: 0, simulatePressure: false, thinning: 0, grain: { kind: 'chalk', amount: 0.7 } } as never);
+    let maxGap = 0;
+    for (let i = 1; i < dabs.length; i++) maxGap = Math.max(maxGap, Math.hypot(dabs[i].x - dabs[i - 1].x, dabs[i].y - dabs[i - 1].y));
+    expect(dabs.length).toBeGreaterThan(50);
+    expect(maxGap).toBeLessThan(10);
+  });
+});

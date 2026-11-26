@@ -70,22 +70,21 @@ export function strokeDabs(s: Stroke, last = true): Dab[] {
   };
   add(pts[0].point[0], pts[0].point[1], pressure[0]);
   // Walk the line, putting a dab down every `step` of distance.
-  let carry = 0;
+  // `next` is how far along the current segment the next dab goes; what's left over carries on to the next segment.
+  const stepAt = (p: number) => Math.max(0.35, radius(p) * 2 * style.spacing);
+  let next = stepAt(pressure[0]);
   for (let i = 1; i < pts.length; i++) {
     const [x0, y0] = pts[i - 1].point, [x1, y1] = pts[i].point;
     const len = Math.hypot(x1 - x0, y1 - y0);
-    if (len === 0) continue;
-    let d = carry;
-    for (;;) {
-      const t = d / len;
-      const p = pressure[i - 1] + (pressure[i] - pressure[i - 1]) * Math.min(1, t);
-      const step = Math.max(0.35, radius(p) * 2 * style.spacing);
-      // Written so a bad number (NaN) ends the walk instead of looping forever.
-      if (!(d + step <= len) || dabs.length > MAX_DABS) { carry = Math.min(step, Math.max(0, d + step - len)) || 0; break; }
-      d += step;
-      const u = d / len;
-      add(x0 + (x1 - x0) * u, y0 + (y1 - y0) * u, pressure[i - 1] + (pressure[i] - pressure[i - 1]) * u);
+    if (!(len > 0)) continue;
+    // Written so a bad number (NaN) ends the walk instead of looping forever.
+    while (next <= len && dabs.length < MAX_DABS) {
+      const u = next / len;
+      const p = pressure[i - 1] + (pressure[i] - pressure[i - 1]) * u;
+      add(x0 + (x1 - x0) * u, y0 + (y1 - y0) * u, p);
+      next += stepAt(p);
     }
+    next = Number.isFinite(next) ? next - len : 1;
   }
   return dabs;
 }
